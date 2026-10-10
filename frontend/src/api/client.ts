@@ -156,7 +156,6 @@ import {
   AgentChat,
   AgentStop,
   AgentChoose,
-  AgentConfirm,
   GetAgentSettings,
   SaveAgentSettings,
   SaveAgentAPIConfig,
@@ -168,9 +167,11 @@ import {
   TestAgentConnection,
   ListAgentMessages,
   ListAgentThreads,
+  DrainAgentWritePending,
   GetAgentThread,
   SetAgentThreadBindings,
   SetAgentThreadSkillIDs,
+  SetAgentThreadMode,
   ListAgentSkills,
   ListSkillsDir,
   ListEnabledAgentSkills,
@@ -214,6 +215,17 @@ import {
   SaveNotebookUI,
   DuplicateNote,
   ExportNote,
+  ListPluginPacks,
+  GetPluginPack,
+  GetPluginProtocol,
+  SetPluginPackEnabled,
+  GetPluginPackSourcePath,
+  BuildPluginPackUI,
+  ReadPluginPackUIFile,
+  RevealPluginPackPath,
+  ListPluginPackReleases,
+  SnapshotPluginPack,
+  RollbackPluginPack,
 } from '../../wailsjs/go/app/Service'
 
 /** 兼容 Wails 返回的 plain object / 类实例字段名差异 */
@@ -721,8 +733,9 @@ export const api = {
   saveMCPConfig: (in_: model.MCPConfigSaveDO) => unwrap(() => SaveMCPConfig(in_)),
   agentChat: async (req: model.AgentChatRequestDO) => unwrap(() => AgentChat(req)),
   agentStop: (threadId: string) => unwrap(() => AgentStop(threadId)),
-  agentConfirm: (pendingId: string, approved: boolean) => unwrap(() => AgentConfirm(pendingId, approved)),
   agentChoose: (answers: model.AgentChoiceAnswerDO[]) => unwrap(() => AgentChoose(answers)),
+  drainAgentWritePending: async (threadId: string) =>
+    unwrap(() => DrainAgentWritePending(threadId)),
   listAgentMessages: async (threadId: string) => asArray(await unwrap(() => ListAgentMessages(threadId))),
   listAgentThreads: async () => asArray(await unwrap(() => ListAgentThreads())),
   listAgentSkills: async () => asArray(await unwrap(() => ListAgentSkills())),
@@ -743,4 +756,24 @@ export const api = {
   ) => unwrap(() => SetAgentThreadBindings(threadId, mentions)),
   setAgentThreadSkillIds: async (threadId: string, skillIds: string[]) =>
     unwrap(() => SetAgentThreadSkillIDs(threadId, skillIds)),
+  setAgentThreadMode: async (threadId: string, mode: string) =>
+    unwrap(() => SetAgentThreadMode(threadId, mode)),
+  listPluginPacks: async () => asArray(await unwrap(() => ListPluginPacks())) as import('./pluginPack').PluginPackInfo[],
+  getPluginPack: async (packId: string) =>
+    unwrap(() => GetPluginPack(packId)) as Promise<import('./pluginPack').PluginPackInfo>,
+  getPluginProtocol: async () =>
+    unwrap(() => GetPluginProtocol()) as Promise<import('./pluginPack').PluginProtocolInfo>,
+  setPluginPackEnabled: async (packId: string, enabled: boolean) =>
+    unwrap(() => SetPluginPackEnabled(packId, enabled)) as Promise<import('./pluginPack').PluginPackInfo>,
+  getPluginPackSourcePath: async (packId: string) => unwrap(() => GetPluginPackSourcePath(packId)),
+  buildPluginPackUI: async (packId: string) =>
+    unwrap(() => BuildPluginPackUI(packId)) as Promise<import('./pluginPack').PluginPackBuildResult>,
+  readPluginPackUIFile: async (packId: string, rel: string) => unwrap(() => ReadPluginPackUIFile(packId, rel)),
+  revealPluginPackPath: async (path: string) => unwrap(() => RevealPluginPackPath(path)),
+  listPluginPackReleases: async (packId: string) =>
+    asArray(await unwrap(() => ListPluginPackReleases(packId))) as import('./pluginPack').PluginPackReleaseInfo[],
+  snapshotPluginPack: async (packId: string) =>
+    unwrap(() => SnapshotPluginPack(packId)) as Promise<import('./pluginPack').PluginPackReleaseInfo>,
+  rollbackPluginPack: async (packId: string, releaseId: string) =>
+    unwrap(() => RollbackPluginPack(packId, releaseId)) as Promise<import('./pluginPack').PluginPackInfo>,
 }

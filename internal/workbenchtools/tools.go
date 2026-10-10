@@ -3,6 +3,7 @@ package workbenchtools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"WWorkbench/internal/conn"
@@ -271,10 +272,7 @@ func toolExecuteSQL(ctx context.Context, d *Deps, raw json.RawMessage) ToolResul
 	}
 	res, err := d.Queries.ExecuteSQL(cctx, in.SessionID, db, sqlText)
 	if err != nil {
-		if ae, ok := err.(*errno.AppError); ok {
-			return Fail(ae.Message)
-		}
-		return Fail(err.Error())
+		return Fail(sqlExecErr(err))
 	}
 	return OKData(res)
 }
@@ -295,12 +293,26 @@ func ExecuteSQLConfirmed(ctx context.Context, d *Deps, argsJSON string) ToolResu
 	}
 	res, err := d.Queries.ExecuteSQL(cctx, in.SessionID, db, strings.TrimSpace(in.SQL))
 	if err != nil {
-		if ae, ok := err.(*errno.AppError); ok {
-			return Fail(ae.Message)
-		}
-		return Fail(err.Error())
+		return Fail(sqlExecErr(err))
 	}
 	return OKData(res)
+}
+
+// sqlExecErr 把超时/底层 detail 写进工具错误，避免只剩「查询失败」。
+func sqlExecErr(err error) string {
+	if err == nil {
+		return "执行失败"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "deadline exceeded") {
+		return "查询超时（限 60s）。请缩小范围、避免相关子查询扫全表，或拆成带索引的轻量 SQL"
+	}
+	if ae, ok := err.(*errno.AppError); ok {
+		if ae.Detail != "" {
+			return ae.Message + "：" + ae.Detail
+		}
+		return ae.Message
+	}
+	return err.Error()
 }
 
 func truncate(s string, n int) string {

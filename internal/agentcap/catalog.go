@@ -17,7 +17,6 @@ type Item struct {
 	Label          string `json:"label"`
 	Risk           Risk   `json:"risk"`
 	Description    string `json:"description"`
-	NeedsConfirm   bool   `json:"needsConfirm"`
 	DefaultEnabled bool   `json:"defaultEnabled"`
 }
 
@@ -137,7 +136,7 @@ func Catalog() []Item {
 		{
 			Name: "execute_sql", Label: "执行 SQL", Risk: RiskWrite,
 			Description:  "readonly=true 时仅 SELECT/SHOW/EXPLAIN 等；写入类 SQL 需用户弹窗确认",
-			NeedsConfirm: true, DefaultEnabled: true,
+			DefaultEnabled: true,
 		},
 		{
 			Name: "notebook_append_content", Label: "写入笔记本", Risk: RiskWrite,
@@ -156,7 +155,7 @@ func Catalog() []Item {
 		},
 		{
 			Name: "get_note", Label: "读取笔记正文", Risk: RiskRead,
-			Description:    "按 noteId 返回 Markdown 全文。当前打开的笔记 id 在本轮工作台现状里。笔记在工作台库内，禁止 cat 文件",
+			Description:    "按 noteId 返回 Markdown 全文。当前打开的笔记 id 在界面快照里。笔记在工作台库内，禁止 cat 文件",
 			DefaultEnabled: true,
 		},
 		{
@@ -182,17 +181,17 @@ func Catalog() []Item {
 		{
 			Name: "start_container", Label: "启动容器", Risk: RiskWrite,
 			Description:  "启动已存在容器；执行前需用户确认",
-			NeedsConfirm: true, DefaultEnabled: true,
+			DefaultEnabled: true,
 		},
 		{
 			Name: "stop_container", Label: "停止容器", Risk: RiskWrite,
 			Description:  "停止运行中容器；执行前需用户确认",
-			NeedsConfirm: true, DefaultEnabled: true,
+			DefaultEnabled: true,
 		},
 		{
 			Name: "remove_container", Label: "删除容器", Risk: RiskWrite,
 			Description:  "强制删除容器；执行前需用户确认（勿用 shell_probe docker rm）",
-			NeedsConfirm: true, DefaultEnabled: true,
+			DefaultEnabled: true,
 		},
 		{
 			Name: "list_log_sources", Label: "列出日志源", Risk: RiskRead,
@@ -232,7 +231,7 @@ func Catalog() []Item {
 		{
 			Name: "execute_http", Label: "执行 HTTP 请求", Risk: RiskWrite,
 			Description:  "优先 requestId；GET/HEAD 直执；变更类方法需用户确认",
-			NeedsConfirm: true, DefaultEnabled: true,
+			DefaultEnabled: true,
 		},
 		{
 			Name: "logs_open", Label: "打开日志中心", Risk: RiskSession,
@@ -252,6 +251,56 @@ func Catalog() []Item {
 		{
 			Name: "ssh_forward_open", Label: "打开 SSH 隧道", Risk: RiskSession,
 			Description:    "切换到终端侧栏隧道；可按 hostId 新建或 presetId 编辑",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "list_plugin_packs", Label: "列出插件包", Risk: RiskRead,
+			Description:    "用户可写插件源码（~/.wworkbench/plugins），不是数据库连接",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "get_plugin_pack", Label: "插件包详情", Risk: RiskRead,
+			Description:    "源码/产物路径、ww-cap 兼容现状、是否已构建 UI",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "get_plugin_protocol", Label: "读插件协议", Risk: RiskRead,
+			Description:    "平台 Host↔Pack 协议 SSOT（PROTOCOL.md + ww-cap）；改任何 pack 前先读",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "list_plugin_pack_files", Label: "列出插件源码文件", Risk: RiskRead,
+			Description:    "相对 pack 根的文件列表",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "read_plugin_pack_file", Label: "读插件源码", Risk: RiskRead,
+			Description:    "按行分段读 plugins/<id> 文本；大文件用 startLine/maxLines 翻页；协议用 get_plugin_protocol",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "edit_plugin_pack_file", Label: "局部编辑插件源码", Risk: RiskWrite,
+			Description:    "oldString→newString 精确替换；大文件首选；需确认，之后再构建",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "write_plugin_pack_file", Label: "整文件写插件源码", Risk: RiskWrite,
+			Description:    "整文件覆盖；仅新建/大重写；局部改用 edit；需确认，之后再构建",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "build_plugin_pack_ui", Label: "构建插件 UI", Risk: RiskWrite,
+			Description:    "vite 构建到 run/<id>/ui，并自动打 release 快照；需确认",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "list_plugin_pack_releases", Label: "列出插件版本", Risk: RiskRead,
+			Description:    "查看 ~/.wworkbench/releases/<id> 历史快照，供回滚",
+			DefaultEnabled: true,
+		},
+		{
+			Name: "rollback_plugin_pack", Label: "回滚插件版本", Risk: RiskWrite,
+			Description:    "恢复指定 release 的源码与 UI；需确认。回滚前会自动再打一版快照",
 			DefaultEnabled: true,
 		},
 		{

@@ -34,6 +34,9 @@ func (s *Store) GetAgentSettings() model.AgentSettingsDO {
 	if provider == AgentProviderDeepSeek {
 		modelName = NormalizeDeepSeekModel(modelName)
 	}
+	if provider == AgentProviderCursor {
+		modelName = NormalizeCursorModel(modelName)
+	}
 	masked := ""
 	if key != "" {
 		if len(key) <= 4 {
@@ -109,6 +112,9 @@ func (s *Store) SaveAgentAPIConfig(in model.AgentAPIConfigSaveDO) error {
 	modelName := strings.TrimSpace(in.Model)
 	if provider == AgentProviderDeepSeek {
 		modelName = NormalizeDeepSeekModel(modelName)
+	}
+	if provider == AgentProviderCursor {
+		modelName = NormalizeCursorModel(modelName)
 	}
 	if err := s.SetAppSetting(AgentKeyAPIBase, base); err != nil {
 		return err

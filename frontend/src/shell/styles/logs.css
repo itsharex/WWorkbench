@@ -5,7 +5,7 @@
 }
 
 .logs-toolbar {
-  border-bottom: none;
+  border-bottom: 1px solid var(--color-divider);
 }
 
 .logs-toolbar .product-actions {

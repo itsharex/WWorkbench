@@ -9,6 +9,7 @@ import (
 	"WWorkbench/internal/harness"
 	"WWorkbench/internal/model"
 	"WWorkbench/internal/store"
+	"WWorkbench/internal/workbench"
 	"WWorkbench/internal/workbenchtools"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -33,7 +34,8 @@ func (s *Service) wireAgentRunner() {
 		Docker:    s.docker,
 		UIActions: workbenchtools.NewUIActionBus(emit),
 		Radar:     radar,
-		Terminals: s.terminals,
+		Terminals:   s.terminals,
+		PluginPacks: s.pluginPacks,
 	}
 	reg := workbenchtools.NewRegistry(deps)
 	s.toolsRegistry = reg
@@ -45,7 +47,7 @@ func (s *Service) wireAgentRunner() {
 	} else {
 		host, err = harness.Open(dataDir, func(gw *toolgateway.Gateway) {
 			harness.RegisterWorkbenchTools(gw, reg, func() map[string]bool {
-				return s.store.GetToolPermissions()
+				return reg.Deps().EffectivePermissions()
 			})
 		})
 		if err != nil {
@@ -162,6 +164,32 @@ func (s *Service) AgentConfirm(pendingID string, approved bool) ApiResult[bool] 
 	return OkResult(true)
 }
 
+// DrainAgentWritePending 自动执行并清空线程上遗留的写工具 pending（产品已取消侧栏确认）。
+func (s *Service) DrainAgentWritePending(threadID string) ApiResult[int] {
+	if threadID == "" {
+		return ErrResult[int](errno.New(errno.CodeInvalidArg, "threadId 不能为空", ""))
+	}
+	if s.agentRunner == nil {
+		return ErrResult[int](errAgentNotReady())
+	}
+	list, err := s.store.ListAgentPendingByThread(threadID)
+	if err != nil {
+		return ErrResult[int](err)
+	}
+	n := 0
+	for _, p := range list {
+		if p.ToolName == workbench.CapOfferChoices {
+			continue
+		}
+		if err := s.agentRunner.Confirm(p.ID, true); err != nil {
+			_ = s.store.DeleteAgentPending(p.ID)
+			continue
+		}
+		n++
+	}
+	return OkResult(n)
+}
+
 // AgentChoose 提交 offer_choices 点选并续跑。
 func (s *Service) AgentChoose(answers []model.AgentChoiceAnswerDO) ApiResult[bool] {
 	if s.agentRunner == nil {
@@ -181,12 +209,26 @@ func (s *Service) AgentChoose(answers []model.AgentChoiceAnswerDO) ApiResult[boo
 	return OkResult(true)
 }
 
-// ListAgentCapabilities 列出 AI 能力目录与当前权限开关。
+// SetAgentThreadMode 把侧栏 ask/agent/plan 同步到后端线程（续跑工具集跟后端，不跟下拉框空壳）。
+func (s *Service) SetAgentThreadMode(threadID, mode string) ApiResult[bool] {
+	if s.agentRunner == nil {
+		return ErrResult[bool](errAgentNotReady())
+	}
+	if err := s.agentRunner.SetThreadMode(threadID, mode); err != nil {
+		return ErrResult[bool](err)
+	}
+	return OkResult(true)
+}
+
+// ListAgentCapabilities 列出 AI 能力目录与当前有效权限（含 pack 启用门控）。
 func (s *Service) ListAgentCapabilities() ApiResult[[]model.AgentCapabilityDO] {
+	if s.toolsRegistry != nil {
+		return OkResult(s.store.BuildAgentCapabilitiesWith(s.toolsRegistry.Deps().EffectivePermissions()))
+	}
 	return OkResult(s.store.BuildAgentCapabilities())
 }
 
-// ApplyAgentProviderPreset 应用 AI 服务商预设（bailian / deepseek / minimax）。
+// ApplyAgentProviderPreset 应用 AI 服务商预设（bailian / deepseek / minimax / cursor）。
 func (s *Service) ApplyAgentProviderPreset(provider string) ApiResult[model.AgentSettingsDO] {
 	if err := s.store.ApplyProviderPreset(provider); err != nil {
 		return ErrResult[model.AgentSettingsDO](err)

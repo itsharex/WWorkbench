@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { AgentOfferChoicesEvent } from '../api/agentEvents'
 import type { AgentMention } from '../features/agent/agentMention'
 import type { AgentPanelView } from '../features/agent/agentTypes'
 import { loadChatMode, persistChatMode, type AgentChatMode } from '../features/agent/agentChatMode'
@@ -6,9 +7,17 @@ import { loadChatMode, persistChatMode, type AgentChatMode } from '../features/a
 const STORAGE_OPEN = 'agent_panel_open'
 const STORAGE_THREAD = 'agent_thread_id'
 
+export type AgentSessionPhase =
+  | 'idle'
+  | 'streaming'
+  | 'tools'
+  | 'needs_choice'
+  | 'error'
+
 export interface AgentChatLine {
   id: string
   role: 'user' | 'assistant' | 'system'
+  /** 工具调用之前的正文（时间线前段） */
   content: string
   mentions?: AgentMention[]
   skillIds?: string[]
@@ -17,6 +26,8 @@ export interface AgentChatLine {
   seq?: number
   /** 本条 assistant 下挂的工具（可折叠，对齐 Cursor） */
   tools?: AgentToolStep[]
+  /** 工具调用之后续写的正文（时间线后段） */
+  contentAfter?: string
 }
 
 let lineSeq = 0
@@ -68,6 +79,8 @@ function persistAgentThreadId(threadId: string) {
 export interface AgentToolStep {
   id: string
   tool: string
+  /** 后端 tool call id；用于 finish 时精确匹配 */
+  callId?: string
   status: 'running' | 'ok' | 'error' | 'denied' | 'need_confirm' | 'need_choice' | ''
   argsPreview?: string
   summary?: string
@@ -79,6 +92,8 @@ interface AgentStore {
   threadId: string
   lines: AgentChatLine[]
   streamingLineId: string | null
+  /** 网络流已结束，UI 仍在匀速揭示的行（避免整段闪现）。 */
+  revealingLineId: string | null
   /** 流式正文缓冲：与 lines 分离，避免每 token 复制整表 messages。 */
   streamingDraft: string
   draftInput: string
@@ -87,11 +102,12 @@ interface AgentStore {
   /** 本轮 draft 是否带了 message（无则输入栏保留原文）。 */
   draftHasMessage: boolean
   draftTick: number
-  toolSteps: AgentToolStep[]
   threadMentions: AgentMention[]
   threadSkillIds: string[]
   pendingTurnSkillIds: string[]
   chatMode: AgentChatMode
+  sessionPhase: AgentSessionPhase
+  pendingChoice: AgentOfferChoicesEvent | null
   setPanelOpen: (open: boolean) => void
   togglePanel: () => void
   setView: (view: AgentPanelView) => void
@@ -103,34 +119,66 @@ interface AgentStore {
   appendStreamDelta: (delta: string) => void
   finishStreaming: (fullContent: string, seq?: number) => void
   cancelStreaming: () => void
+  clearRevealing: (lineId?: string) => void
   applyDraft: (payload: { message?: string; mentions: AgentMention[]; skillIds?: string[] }) => void
-  pushToolStep: (tool: string, argsPreview?: string) => string
-  finishToolStep: (tool: string, status?: AgentToolStep['status'], summary?: string) => void
-  clearToolSteps: () => void
+  pushToolStep: (tool: string, argsPreview?: string, callId?: string) => string
+  finishToolStep: (
+    match: { callId?: string; tool: string },
+    status?: AgentToolStep['status'],
+    summary?: string,
+  ) => void
   setThreadMentions: (mentions: AgentMention[]) => void
   setThreadSkillIds: (ids: string[]) => void
   setPendingTurnSkillIds: (ids: string[]) => void
   setChatMode: (mode: AgentChatMode) => void
+  setSessionPhase: (phase: AgentSessionPhase) => void
+  setPendingChoice: (pending: AgentOfferChoicesEvent | null) => void
+  clearSessionWait: () => void
+  /** 统计当前线程仍在 running 的工具数。 */
+  countRunningTools: () => number
+}
+
+/** 流式 delta 合并到下一帧再写入，避免每 token 同步打爆 React。 */
+let streamDeltaBuf = ''
+let streamDeltaRaf = 0
+
+function flushStreamDeltaBuf() {
+  if (streamDeltaRaf) {
+    cancelAnimationFrame(streamDeltaRaf)
+    streamDeltaRaf = 0
+  }
+  const chunk = streamDeltaBuf
+  streamDeltaBuf = ''
+  if (!chunk) return
+  useAgentStore.setState((s) => {
+    if (!s.streamingLineId) return s
+    return {
+      streamingDraft: s.streamingDraft + chunk,
+      sessionPhase: s.pendingChoice ? 'needs_choice' : 'streaming',
+    }
+  })
 }
 
 /** useAgentStore AI 侧栏与对话状态（收起不丢会话）。 */
-export const useAgentStore = create<AgentStore>((set) => ({
+export const useAgentStore = create<AgentStore>((set, get) => ({
   panelOpen: loadAgentPanelOpen(),
   view: 'chat',
   threadId: loadAgentThreadId(),
   lines: [],
   streamingLineId: null,
+  revealingLineId: null,
   streamingDraft: '',
   draftInput: '',
   draftMentions: [],
   draftSkillIds: [],
   draftHasMessage: false,
   draftTick: 0,
-  toolSteps: [],
   threadMentions: [],
   threadSkillIds: [],
   pendingTurnSkillIds: [],
   chatMode: loadChatMode(),
+  sessionPhase: 'idle',
+  pendingChoice: null,
   setPanelOpen: (open) => {
     persistAgentPanelOpen(open)
     set({ panelOpen: open })
@@ -157,12 +205,14 @@ export const useAgentStore = create<AgentStore>((set) => ({
       threadId: '',
       lines: [],
       streamingLineId: null,
+      revealingLineId: null,
       streamingDraft: '',
       view: 'chat',
-      toolSteps: [],
       threadMentions: [],
       threadSkillIds: [],
       pendingTurnSkillIds: [],
+      sessionPhase: 'idle',
+      pendingChoice: null,
     })
   },
   setThreadMentions: (threadMentions) => set({ threadMentions }),
@@ -171,6 +221,32 @@ export const useAgentStore = create<AgentStore>((set) => ({
   setChatMode: (chatMode) => {
     persistChatMode(chatMode)
     set({ chatMode })
+  },
+  setSessionPhase: (sessionPhase) => set({ sessionPhase }),
+  setPendingChoice: (pendingChoice) =>
+    set({
+      pendingChoice,
+      sessionPhase: pendingChoice
+        ? 'needs_choice'
+        : get().streamingLineId
+          ? 'streaming'
+          : get().countRunningTools() > 0
+            ? 'tools'
+            : 'idle',
+    }),
+  clearSessionWait: () =>
+    set({
+      pendingChoice: null,
+      sessionPhase: 'idle',
+    }),
+  countRunningTools: () => {
+    let n = 0
+    for (const ln of get().lines) {
+      for (const step of ln.tools || []) {
+        if (step.status === 'running') n += 1
+      }
+    }
+    return n
   },
   applyDraft: (payload) =>
     set((s) => ({
@@ -183,7 +259,7 @@ export const useAgentStore = create<AgentStore>((set) => ({
       draftSkillIds: payload.skillIds ?? [],
       draftTick: s.draftTick + 1,
     })),
-  pushToolStep: (tool, argsPreview) => {
+  pushToolStep: (tool, argsPreview, callId) => {
     const id = `tool-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     set((s) => {
       let lines = [...s.lines]
@@ -191,15 +267,31 @@ export const useAgentStore = create<AgentStore>((set) => ({
       let streamingDraft = s.streamingDraft
       if (streamingLineId) {
         const cur = lines.find((ln) => ln.id === streamingLineId)
+        const alreadyTools = !!(cur?.tools && cur.tools.length)
         if (streamingDraft.trim()) {
           lines = lines.map((ln) =>
-            ln.id === streamingLineId ? { ...ln, content: streamingDraft } : ln,
+            ln.id === streamingLineId
+              ? alreadyTools
+                ? { ...ln, contentAfter: streamingDraft }
+                : { ...ln, content: streamingDraft }
+              : ln,
           )
-        } else if (!cur?.content.trim() && !(cur?.tools && cur.tools.length)) {
+        } else if (
+          !cur?.content.trim() &&
+          !cur?.contentAfter?.trim() &&
+          !alreadyTools
+        ) {
           lines = lines.filter((ln) => ln.id !== streamingLineId)
         }
         streamingLineId = null
         streamingDraft = ''
+      }
+      const step: AgentToolStep = {
+        id,
+        tool,
+        callId: callId || undefined,
+        status: 'running',
+        argsPreview,
       }
       let idx = -1
       for (let i = lines.length - 1; i >= 0; i--) {
@@ -208,77 +300,176 @@ export const useAgentStore = create<AgentStore>((set) => ({
           break
         }
       }
-      if (idx < 0) {
+      // 上一段已有工具后续写：再调工具则新开一条，按历史先后排列，不挤进旧块
+      if (idx >= 0 && (lines[idx].contentAfter || '').trim()) {
         const nid = nextAgentLineId()
-        lines.push({ id: nid, role: 'assistant', content: '', tools: [] })
-        idx = lines.length - 1
+        lines.push({ id: nid, role: 'assistant', content: '', tools: [step] })
+      } else if (idx < 0) {
+        const nid = nextAgentLineId()
+        lines.push({ id: nid, role: 'assistant', content: '', tools: [step] })
+      } else {
+        const ln = lines[idx]
+        lines[idx] = {
+          ...ln,
+          tools: [...(ln.tools || []), step],
+        }
       }
-      const ln = lines[idx]
-      lines[idx] = {
-        ...ln,
-        tools: [...(ln.tools || []), { id, tool, status: 'running', argsPreview }],
+      return {
+        lines,
+        streamingLineId,
+        streamingDraft,
+        revealingLineId: null,
+        sessionPhase: s.pendingChoice ? 'needs_choice' : 'tools',
       }
-      return { lines, streamingLineId, streamingDraft, toolSteps: [] }
     })
     return id
   },
-  finishToolStep: (tool, status = 'ok', summary) =>
+  finishToolStep: (match, status = 'ok', summary) =>
     set((s) => {
       const lines = s.lines.map((ln) => ({ ...ln, tools: ln.tools ? [...ln.tools] : undefined }))
-      for (let i = lines.length - 1; i >= 0; i--) {
+      const callId = match.callId?.trim()
+      const openStatuses = new Set(['running'])
+      outer: for (let i = lines.length - 1; i >= 0; i--) {
         const tools = lines[i].tools
         if (!tools?.length) continue
-        const ti = tools.findIndex((step) => step.tool === tool && step.status === 'running')
+        let ti = -1
+        if (callId) {
+          ti = tools.findIndex(
+            (step) =>
+              openStatuses.has(step.status) &&
+              (step.callId === callId || step.id === callId),
+          )
+        }
+        if (ti < 0) {
+          ti = tools.findIndex(
+            (step) => step.tool === match.tool && openStatuses.has(step.status),
+          )
+        }
         if (ti < 0) continue
-        tools[ti] = { ...tools[ti], status, summary }
+        tools[ti] = {
+          ...tools[ti],
+          status,
+          summary,
+          callId: callId || tools[ti].callId,
+        }
         lines[i] = { ...lines[i], tools }
-        break
+        break outer
       }
-      return { lines, toolSteps: [] }
+      let running = 0
+      for (const ln of lines) {
+        for (const step of ln.tools || []) {
+          if (step.status === 'running') running += 1
+        }
+      }
+      const phase: AgentSessionPhase = s.pendingChoice
+        ? 'needs_choice'
+        : s.streamingLineId
+          ? 'streaming'
+          : running > 0
+            ? 'tools'
+            : s.sessionPhase === 'error'
+              ? 'error'
+              : 'idle'
+      return { lines, sessionPhase: phase }
     }),
-  clearToolSteps: () => set({ toolSteps: [] }),
   beginStreaming: () => {
-    const id = nextAgentLineId()
-    set((s) => ({
-      streamingLineId: id,
-      streamingDraft: '',
-      lines: [...s.lines, { id, role: 'assistant', content: '', tools: [] }],
-    }))
-  },
-  appendStreamDelta: (delta) =>
     set((s) => {
-      if (!s.streamingLineId || !delta) return s
-      return { streamingDraft: s.streamingDraft + delta }
-    }),
-  finishStreaming: (fullContent, seq) =>
+      // 同一轮（tools 之后继续吐字）复用最近一条 assistant，避免多条 id
+      let idx = -1
+      for (let i = s.lines.length - 1; i >= 0; i--) {
+        if (s.lines[i].role === 'assistant') {
+          idx = i
+          break
+        }
+        if (s.lines[i].role === 'user') break
+      }
+      if (idx >= 0) {
+        const ln = s.lines[idx]
+        const hasTools = !!(ln.tools && ln.tools.length)
+        // 已有工具：续写进 contentAfter，保持时间线「文 → 工具 → 文」
+        return {
+          streamingLineId: ln.id,
+          streamingDraft: hasTools ? ln.contentAfter || '' : ln.content || '',
+          sessionPhase: s.pendingChoice ? 'needs_choice' : 'streaming',
+        }
+      }
+      const id = nextAgentLineId()
+      return {
+        streamingLineId: id,
+        streamingDraft: '',
+        sessionPhase: s.pendingChoice ? 'needs_choice' : 'streaming',
+        lines: [...s.lines, { id, role: 'assistant', content: '', tools: [] }],
+      }
+    })
+  },
+  appendStreamDelta: (delta) => {
+    if (!delta || !get().streamingLineId) return
+    streamDeltaBuf += delta
+    if (streamDeltaRaf) return
+    streamDeltaRaf = requestAnimationFrame(() => {
+      streamDeltaRaf = 0
+      flushStreamDeltaBuf()
+    })
+  },
+  finishStreaming: (fullContent, seq) => {
+    flushStreamDeltaBuf()
     set((s) => {
       const sid = s.streamingLineId
       if (!sid) return { streamingLineId: null, streamingDraft: '' }
-      const merged = fullContent || s.streamingDraft
       const turnSkills = s.pendingTurnSkillIds.length ? [...s.pendingTurnSkillIds] : undefined
+      let running = 0
+      for (const ln of s.lines) {
+        for (const step of ln.tools || []) {
+          if (step.status === 'running') running += 1
+        }
+      }
       return {
         streamingLineId: null,
+        revealingLineId: sid,
         streamingDraft: '',
         pendingTurnSkillIds: [],
-        lines: s.lines.map((ln) =>
-          ln.id === sid
-            ? {
-                ...ln,
-                content: merged || ln.content,
-                seq: seq ?? ln.seq,
-                skillIds: turnSkills ?? ln.skillIds,
-              }
-            : ln,
-        ),
+        sessionPhase: s.pendingChoice ? 'needs_choice' : running > 0 ? 'tools' : 'idle',
+        lines: s.lines.map((ln) => {
+          if (ln.id !== sid) return ln
+          const hasTools = !!(ln.tools && ln.tools.length)
+          const prev = hasTools ? ln.contentAfter || '' : ln.content || ''
+          const incoming = (fullContent || s.streamingDraft || '').trimEnd()
+          let next = prev
+          if (!prev) next = incoming
+          else if (!incoming) next = prev
+          else if (incoming.startsWith(prev) || incoming.includes(prev)) {
+            next = incoming.length >= prev.length ? incoming : prev
+          } else if (prev.includes(incoming)) {
+            next = prev
+          } else {
+            next = `${prev.replace(/\s+$/, '')}\n\n${incoming}`
+          }
+          return {
+            ...ln,
+            ...(hasTools ? { contentAfter: next } : { content: next }),
+            seq: ln.seq && ln.seq > 0 ? ln.seq : seq,
+            skillIds: turnSkills ?? ln.skillIds,
+          }
+        }),
       }
+    })
+  },
+  clearRevealing: (lineId) =>
+    set((s) => {
+      if (lineId && s.revealingLineId && s.revealingLineId !== lineId) return s
+      return { revealingLineId: null }
     }),
-  cancelStreaming: () =>
+  cancelStreaming: () => {
+    flushStreamDeltaBuf()
     set((s) => {
       const sid = s.streamingLineId
+      // 无进行中的流式行时不要动 revealingLineId，否则 onDone 会掐掉收尾打字机
       if (!sid) return s
       const line = s.lines.find((ln) => ln.id === sid)
-      const text = (line?.content.trim() || s.streamingDraft.trim()) ?? ''
       const hasTools = !!(line?.tools && line.tools.length)
+      const sealed = hasTools ? line?.contentAfter?.trim() : line?.content?.trim()
+      const draft = s.streamingDraft.trim()
+      const text = sealed || draft
       if (!text && !hasTools) {
         return {
           streamingLineId: null,
@@ -286,13 +477,20 @@ export const useAgentStore = create<AgentStore>((set) => ({
           lines: s.lines.filter((ln) => ln.id !== sid),
         }
       }
+      if (!draft || sealed) {
+        return { streamingLineId: null, streamingDraft: '' }
+      }
       return {
         streamingLineId: null,
         streamingDraft: '',
-        lines: text && !line?.content.trim()
-          ? s.lines.map((ln) => (ln.id === sid ? { ...ln, content: s.streamingDraft } : ln))
-          : s.lines,
+        lines: s.lines.map((ln) =>
+          ln.id === sid
+            ? hasTools
+              ? { ...ln, contentAfter: s.streamingDraft }
+              : { ...ln, content: s.streamingDraft }
+            : ln,
+        ),
       }
-    }),
+    })
+  },
 }))
-

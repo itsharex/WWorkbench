@@ -54,7 +54,6 @@ export function AgentPermissionsView({
               <span className={`agent-cap-risk agent-cap-risk-${c.risk}`}>{riskLabel(t, c.risk)}</span>
             </label>
             <span className="agent-cap-desc">{c.description}</span>
-            {c.needsConfirm && <span className="agent-cap-badge">{t('agent.needsConfirmBadge')}</span>}
           </li>
         ))}
       </ul>

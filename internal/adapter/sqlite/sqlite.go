@@ -709,5 +709,13 @@ func canWrapAsSubquery(sql string) bool {
 			return false
 		}
 	}
+	// 顶层已是 COUNT/聚合标量时勿再包 SELECT COUNT(*) FROM (…)：
+	// 重查询会跑两遍，Agent 的 SELECT COUNT(*)…EXISTS 极易触 60s 超时。
+	if !strings.Contains(upper, " GROUP BY ") && !strings.Contains(upper, "\nGROUP BY ") {
+		trim := strings.TrimSpace(upper)
+		if strings.HasPrefix(trim, "SELECT COUNT(") || strings.HasPrefix(trim, "SELECT COUNT (") {
+			return false
+		}
+	}
 	return true
 }

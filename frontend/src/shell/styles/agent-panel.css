@@ -1,16 +1,34 @@
 /* Agent 侧栏壳：面板 / 历史 / 子视图
  * 左缘 ResizeHandle + 右侧内容列（与 ProductLayout 同一套分栏语言） */
 .agent-panel {
-  /* 侧栏字号比主工作区小两号，信息密度更高 */
-  --font-size-caption: 8px;
-  --font-size-ui-sm: 9px;
-  --font-size-ui: 10px;
-  --font-size-title: 11px;
+  /* 对齐 Cursor workbench token（conversation / cursor-font-size-lg） */
+  --font-size-caption: 11px; /* --cursor-font-size-xs */
+  --font-size-ui-sm: 12px; /* --cursor-font-size-sm */
+  --font-size-ui: 14px; /* --cursor-font-size-lg / conversation */
+  --font-size-title: 14px;
+  --agent-prose-lh: 22px; /* --cursor-line-height-lg */
+  --agent-prose-gap: 0.75em; /* --rte-paragraph-margin-bottom */
+  --agent-turn-gap: 8px; /* --cursor-spacing-2 / transcript-row-gap */
+  /*
+   * Cursor 对话层实际优先 "SF Pro"（见 workbench .ui-y1aii3），
+   * 再回落到 system-ui；中文由系统 CJK 补齐。
+   * WKWebView 光栅与 Chromium 不同，字距用略紧的 -0.03em 对齐观感。
+   */
+  --agent-letter-spacing: -0.03em;
+  --agent-font: 'SF Pro', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto,
+    Helvetica, Arial, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+  --agent-font-mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-family: var(--agent-font);
+  font-weight: 400;
+  letter-spacing: var(--agent-letter-spacing);
+  font-feature-settings: 'kern' 1;
   flex-shrink: 0;
   display: flex;
   flex-direction: row;
   background: var(--color-surface);
-  border-left: 1px solid var(--color-divider);
+  /* 左缘只由 ResizeHandle 画线，避免与 border-left 叠成双线 */
+  border-left: none;
   min-height: 0;
   min-width: 0;
   max-width: 72vw;
@@ -121,5 +139,42 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+.agent-chat-stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.agent-history-drawer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid var(--color-divider);
+}
+
+.agent-history-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--font-size-ui);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.agent-history-drawer .agent-history {
+  flex: 1;
 }
 

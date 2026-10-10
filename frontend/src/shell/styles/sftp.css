@@ -4,8 +4,9 @@
   container-name: sftp-workbench;
 }
 
+/* 保留工具条底发丝线，与右侧 Agent 头部分隔同高，避免「上面缺线」 */
 .sftp-toolbar {
-  border-bottom: none;
+  border-bottom: 1px solid var(--color-divider);
 }
 
 .sftp-toolbar .product-toolbar-status {
@@ -17,7 +18,8 @@
 
 .sftp-sidebar {
   background: var(--color-sidebar);
-  border-right: 1px solid var(--color-divider);
+  /* 与 .app-sidebar 共用右边线，勿再叠一条 */
+  border-right: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -33,7 +35,7 @@
 }
 
 .sftp-sidebar .conn-item {
-  min-height: 34px;
+  min-height: 26px;
   border-bottom: none;
 }
 
@@ -52,7 +54,7 @@
 }
 
 .sftp-editor-chrome {
-  border-bottom-color: var(--color-border-strong);
+  border-bottom: 1px solid var(--color-divider);
 }
 
 .sftp-panes {
@@ -239,9 +241,10 @@
 .sftp-name-cell {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--list-row-gap, 3px);
   max-width: 100%;
   min-width: 0;
+  line-height: 1.2;
 }
 
 .sftp-name-head {
@@ -310,7 +313,8 @@
 }
 
 .sftp-table-bt .sftp-row td {
-  height: 32px;
+  height: var(--list-row-height, 22px);
+  padding-block: 0;
 }
 
 .sftp-pane-bt .sftp-pane-body {
@@ -353,12 +357,12 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  height: 26px;
+  height: 22px;
   text-align: left;
   padding: 0 8px;
   font-weight: 650;
   font-size: var(--font-size-caption);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-divider);
@@ -366,10 +370,11 @@
 }
 
 .sftp-table td {
-  height: 28px;
+  height: var(--list-row-height, 22px);
   padding: 0 8px;
   border-bottom: none;
   color: var(--color-text-secondary);
+  line-height: 1.2;
 }
 
 /* 名称占剩余宽度；大小/时间按内容自适应且不换行 */

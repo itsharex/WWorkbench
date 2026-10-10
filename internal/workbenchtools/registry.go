@@ -420,7 +420,7 @@ func (r *Registry) registerBuiltins() {
 	})
 	r.add(ToolDef{
 		Name:        workbench.CapGetNote,
-		Description: "按 noteId 读取笔记 Markdown 全文。用户说「这篇/当前笔记」时用本轮工作台现状里的 noteId。不要 cat，不要 recall_resource。",
+		Description: "按 noteId 读取笔记 Markdown 全文。用户说「这篇/当前笔记」时用界面快照里的 noteId。不要 cat，不要 recall_resource。",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -727,6 +727,128 @@ func (r *Registry) registerBuiltins() {
 			"required": []interface{}{"id"},
 		},
 		Handler: toolUpdateAgentSkill,
+	})
+	r.add(ToolDef{
+		Name:        workbench.CapListPluginPacks,
+		Description: "列出工作台插件包（~/.wworkbench/plugins）。用户说「db 插件 / 数据库插件 / pack UI」指这个，不是数据库连接。改界面先 list 再读 src/ui。",
+		Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		Handler:     toolListPluginPacks,
+	})
+	r.add(ToolDef{
+		Name:        workbench.CapGetPluginPack,
+		Description: "获取单个插件包：源码/产物路径、是否已构建 UI、ww-cap 兼容（capOk/capDetail）。packId 如 database。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"packId": map[string]interface{}{"type": "string", "description": "如 database"},
+			},
+			"required": []interface{}{"packId"},
+		},
+		Handler: toolGetPluginPack,
+	})
+	r.add(ToolDef{
+		Name:        workbench.CapGetPluginProtocol,
+		Description: "读取平台 Host↔Pack 插件协议 SSOT（PROTOCOL.md + hostCapVersion）。改任何 pack 前必须先调用；勿 list_skills；各 pack 的 HOST.md 只是补充。",
+		Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		Handler:     toolGetPluginProtocol,
+	})
+	r.add(ToolDef{
+		Name:        workbench.CapListPluginPackFiles,
+		Description: "列出某插件包源码相对路径。协议用 get_plugin_protocol；database 产品 UI 一般在 src/ui/src/DatabaseWorkbench.tsx。不要用 read_file（那是 ningharness 技能脚本）。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"packId": map[string]interface{}{"type": "string"},
+			},
+			"required": []interface{}{"packId"},
+		},
+		Handler: toolListPluginPackFiles,
+	})
+	r.add(ToolDef{
+		Name: workbench.CapReadPluginPackFile,
+		Description: "按行分段读取插件源码（避免整文件顶满上下文被截断）。" +
+			"relPath 相对 ~/.wworkbench/plugins/<packId>。" +
+			"大文件用 startLine/maxLines 翻页：看返回 hasMore/nextStartLine，再读下一段；不要 recall_resource 拼全文。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"packId":     map[string]interface{}{"type": "string"},
+				"relPath":    map[string]interface{}{"type": "string"},
+				"startLine":  map[string]interface{}{"type": "integer", "description": "从第几行开始（1-based），默认 1"},
+				"maxLines":   map[string]interface{}{"type": "integer", "description": "最多读多少行，默认 220，最大 400"},
+			},
+			"required": []interface{}{"packId", "relPath"},
+		},
+		Handler: toolReadPluginPackFile,
+	})
+	r.add(ToolDef{
+		Name: workbench.CapEditPluginPackFile,
+		Description: "局部编辑插件源码（需确认）：用 oldString→newString 精确替换，适合大文件。" +
+			"默认 oldString 必须唯一匹配；多处时扩大上下文或设 replaceAll=true。" +
+			"只改源码不会立刻变界面，确认后再 build_plugin_pack_ui。优先于 write_plugin_pack_file。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"packId":     map[string]interface{}{"type": "string"},
+				"relPath":    map[string]interface{}{"type": "string"},
+				"oldString":  map[string]interface{}{"type": "string", "description": "文件中必须存在的原文片段（含缩进）"},
+				"newString":  map[string]interface{}{"type": "string", "description": "替换后的文本；空串表示删除该片段"},
+				"replaceAll": map[string]interface{}{"type": "boolean", "description": "true 时替换全部匹配；默认 false（须唯一）"},
+			},
+			"required": []interface{}{"packId", "relPath", "oldString", "newString"},
+		},
+		Handler: toolEditPluginPackFile,
+	})
+	r.add(ToolDef{
+		Name:        workbench.CapWritePluginPackFile,
+		Description: "整文件覆盖写插件源码（需确认）。仅新建文件或大幅重写时用；已有大文件局部改请用 edit_plugin_pack_file。只改源码不会立刻变界面，确认后再 build_plugin_pack_ui。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"packId":  map[string]interface{}{"type": "string"},
+				"relPath": map[string]interface{}{"type": "string"},
+				"content": map[string]interface{}{"type": "string", "description": "完整文件 UTF-8 正文"},
+			},
+			"required": []interface{}{"packId", "relPath", "content"},
+		},
+		Handler: toolWritePluginPackFile,
+	})
+	r.add(ToolDef{
+		Name:        workbench.CapBuildPluginPackUI,
+		Description: "构建插件 UI 到 ~/.wworkbench/run/<packId>/ui（需确认）。成功后自动写入 releases 快照，产品线热加载。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"packId": map[string]interface{}{"type": "string"},
+			},
+			"required": []interface{}{"packId"},
+		},
+		Handler: toolBuildPluginPackUI,
+	})
+	r.add(ToolDef{
+		Name:        workbench.CapListPluginPackReleases,
+		Description: "列出插件历史版本（~/.wworkbench/releases/<packId>）。回滚前先看 releaseId。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"packId": map[string]interface{}{"type": "string"},
+			},
+			"required": []interface{}{"packId"},
+		},
+		Handler: toolListPluginPackReleases,
+	})
+	r.add(ToolDef{
+		Name:        workbench.CapRollbackPluginPack,
+		Description: "回滚插件到指定 release（需确认）。恢复源码与 UI；回滚前会自动快照当前。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"packId":    map[string]interface{}{"type": "string"},
+				"releaseId": map[string]interface{}{"type": "string", "description": "list_plugin_pack_releases 返回的 id"},
+			},
+			"required": []interface{}{"packId", "releaseId"},
+		},
+		Handler: toolRollbackPluginPack,
 	})
 	r.add(offerChoicesToolDef())
 	r.add(ToolDef{

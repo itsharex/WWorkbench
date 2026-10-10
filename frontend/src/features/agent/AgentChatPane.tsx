@@ -1,41 +1,36 @@
-import { useRef } from 'react'
-import { useVirtualizer } from '@tanstack/react-virtual'
 import type { RefObject } from 'react'
-import type { AgentConfirmEvent, AgentOfferChoicesEvent } from '../../api/agentEvents'
-import type { AgentChatLine } from '../../stores/agentStore'
+import type { AgentChatLine, AgentSessionPhase } from '../../stores/agentStore'
+import { useAgentStore } from '../../stores/agentStore'
 import type { AgentChatMode } from './agentChatMode'
 import type { AgentMention, AgentMentionKind } from './agentMention'
-import { AgentConfirmPanel } from './AgentConfirmPanel'
-import type { ChoiceSubmitAnswer } from './AgentChoicePanel'
+import { pressProps } from '../../components/compat'
+import { AgentChoicePanel, type ChoiceSubmitAnswer } from './AgentChoicePanel'
 import type { AgentChoiceQuestion } from './agentChoice'
 import { AgentInputBar } from './AgentInputBar'
 import { AgentChatTurn } from './AgentChatTurn'
 import { AgentStarter, type AgentStarterItem } from './AgentStarter'
 import type { ChatImage } from './agentImages'
 
-const VIRTUALIZE_MIN = 24
-const TURN_ESTIMATE_PX = 108
-
 interface Props {
   t: (key: string, params?: Record<string, string | number>) => string
   lines: AgentChatLine[]
-  busy: boolean
+  sessionPhase: AgentSessionPhase
+  active: boolean
+  runningToolCount: number
   chatMode: AgentChatMode
   skillCatalog: Record<string, string>
   threadMentions: AgentMention[]
   threadSkillIds: string[]
   autoMentions: AgentMention[]
-  pending: AgentConfirmEvent | null
-  pendingChoice: AgentOfferChoicesEvent | null
+  choiceQuestions?: AgentChoiceQuestion[]
   threadId: string
   modelName: string
   provider: string
   scrollRef: RefObject<HTMLDivElement>
+  /** 列表底部哨兵：贴底跟滚用 */
+  endRef: RefObject<HTMLDivElement>
   onMessagesScroll: () => void
-  onChoiceDraft: (text: string) => void
   onChoiceSubmit: (answers: ChoiceSubmitAnswer[]) => void
-  onSaveToNotebook: (content: string) => void
-  onConfirm: (ok: boolean) => void
   onModeChange: (mode: AgentChatMode) => void
   onModelChange: (id: string) => void
   onSend: (
@@ -49,17 +44,6 @@ interface Props {
   onUnbindThreadMention: (id: string, kind: AgentMentionKind) => void
   onUnbindThreadSkill: (id: string) => void
   onSuggest?: (item: AgentStarterItem) => void
-}
-
-function offerEventToQuestions(evt: AgentOfferChoicesEvent): AgentChoiceQuestion[] {
-  return evt.items.map((it) => ({
-    n: it.n,
-    id: it.pendingId,
-    mode: it.mode,
-    prompt: it.prompt || it.summary || '',
-    options: (it.options || []).map((o) => ({ key: o.key, label: o.label })),
-    placeholder: it.placeholder,
-  }))
 }
 
 function lastAssistantIndex(lines: AgentChatLine[]): number {
@@ -82,27 +66,26 @@ function shouldShowRoleLabel(lines: AgentChatLine[], idx: number): boolean {
   return true
 }
 
-/** AgentChatPane 对话区：轨迹、消息、确认、输入栏。 */
+/** AgentChatPane 对话区：轨迹、消息、选题 ActionRail、输入栏（无虚列表，避免工具展开留白）。 */
 export function AgentChatPane({
   t,
   lines,
-  busy,
+  sessionPhase,
+  active,
+  runningToolCount,
   chatMode,
   skillCatalog,
   threadMentions,
   threadSkillIds,
   autoMentions,
-  pending,
-  pendingChoice,
+  choiceQuestions,
   threadId,
   modelName,
   provider,
   scrollRef,
+  endRef,
   onMessagesScroll,
-  onChoiceDraft,
   onChoiceSubmit,
-  onSaveToNotebook,
-  onConfirm,
   onModeChange,
   onModelChange,
   onSend,
@@ -112,104 +95,106 @@ export function AgentChatPane({
   onSuggest,
 }: Props) {
   const lastAssistantIdx = lastAssistantIndex(lines)
-  const useVirtual = lines.length >= VIRTUALIZE_MIN
-  const listRef = useRef<HTMLDivElement>(null)
-
-  const virtualizer = useVirtualizer({
-    count: lines.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => TURN_ESTIMATE_PX,
-    overscan: 6,
-    measureElement: (el) => el.getBoundingClientRect().height,
-  })
-
-  const renderTurn = (line: AgentChatLine, idx: number) => {
-    const toolChoiceQuestions =
-      idx === lastAssistantIdx && pendingChoice?.items.length
-        ? offerEventToQuestions(pendingChoice)
-        : undefined
-    return (
-      <AgentChatTurn
-        key={line.id}
-        line={line}
-        threadId={threadId}
-        isLastAssistant={idx === lastAssistantIdx}
-        showRoleLabel={shouldShowRoleLabel(lines, idx)}
-        busy={busy}
-        toolChoiceQuestions={toolChoiceQuestions}
-        skillCatalog={skillCatalog}
-        t={t}
-        onSaveToNotebook={onSaveToNotebook}
-        onChoiceDraft={onChoiceDraft}
-        onChoiceSubmit={onChoiceSubmit}
-      />
-    )
-  }
+  const streamingLineId = useAgentStore((s) => s.streamingLineId)
+  const streamingDraft = useAgentStore((s) => s.streamingDraft)
+  const showActionRail = Boolean(choiceQuestions?.length)
+  const ENV_TOOL = /^(cursor_bridge|mcp)/
+  const lastTools = lastAssistantIdx >= 0 ? lines[lastAssistantIdx].tools || [] : []
+  const runningBusiness = lastTools.filter(
+    (s) => s.status === 'running' && !ENV_TOOL.test(s.tool),
+  )
+  const runningEnvOnly =
+    lastTools.some((s) => s.status === 'running' && ENV_TOOL.test(s.tool)) &&
+    runningBusiness.length === 0
+  const showStreamingIdle =
+    sessionPhase === 'streaming' &&
+    runningToolCount === 0 &&
+    Boolean(streamingLineId) &&
+    !streamingDraft.trim()
 
   return (
     <div className="agent-chat-pane">
       <div className="agent-messages" ref={scrollRef} onScroll={onMessagesScroll}>
-        {lines.length === 0 &&
-          (onSuggest ? (
-            <AgentStarter t={t} busy={busy} onSuggest={onSuggest} />
-          ) : (
-            <div className="agent-empty">{t('agent.hint')}</div>
-          ))}
-        {useVirtual ? (
-          <div
-            ref={listRef}
-            className="agent-messages-virtual"
-            style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}
-          >
-            {virtualizer.getVirtualItems().map((item) => (
-              <div
-                key={lines[item.index].id}
-                data-index={item.index}
-                ref={virtualizer.measureElement}
-                className="agent-messages-virtual-item"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${item.start}px)`,
-                }}
-              >
-                {renderTurn(lines[item.index], item.index)}
-              </div>
+        <div className="agent-messages-inner">
+          {lines.length === 0 &&
+            (onSuggest ? (
+              <AgentStarter t={t} busy={active} onSuggest={onSuggest} />
+            ) : (
+              <div className="agent-empty">{t('agent.hint')}</div>
             ))}
-          </div>
-        ) : (
-          lines.map((line, idx) => renderTurn(line, idx))
-        )}
-        {busy && (
-          <div className="agent-turn agent-turn-system">
-            <span className="agent-thinking">
-              <span className="agent-thinking-dot" />
-              <span className="agent-thinking-dot" />
-              <span className="agent-thinking-dot" />
-              {chatMode === 'ask'
-                ? t('agent.modeAsk')
-                : chatMode === 'plan'
-                  ? t('agent.modePlan')
-                  : t('agent.modeAgent')}
-              {' · '}
-              {t('agent.thinking')}
-            </span>
-          </div>
-        )}
+          {lines.map((line, idx) => (
+            <AgentChatTurn
+              key={line.id}
+              line={line}
+              threadId={threadId}
+              isLastAssistant={idx === lastAssistantIdx}
+              showRoleLabel={shouldShowRoleLabel(lines, idx)}
+              choiceDisabled={active || idx !== lastAssistantIdx}
+              hideInlineChoice={Boolean(choiceQuestions?.length) && idx === lastAssistantIdx}
+              skillCatalog={skillCatalog}
+              t={t}
+              onChoiceSubmit={onChoiceSubmit}
+            />
+          ))}
+          {runningBusiness.length > 0 && (
+            <div className="agent-turn agent-turn-system">
+              <div className="agent-activity agent-activity-tools" role="status">
+                <span className="agent-turn-tool-spinner" aria-hidden />
+                <span className="agent-activity-label">
+                  {runningBusiness.length === 1
+                    ? t('agent.toolRunningOne', { name: runningBusiness[0].tool })
+                    : t('agent.toolsRunning', { count: runningBusiness.length })}
+                </span>
+                {runningBusiness.length > 1 ? (
+                  <span className="agent-activity-names">
+                    {runningBusiness.map((s) => s.tool).join(' · ')}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          )}
+          {runningEnvOnly && (
+            <div className="agent-turn agent-turn-system">
+              <span className="agent-activity">
+                <span className="agent-turn-tool-spinner" aria-hidden />
+                {t('agent.toolsPreparing')}
+              </span>
+            </div>
+          )}
+          {showStreamingIdle && (
+            <div className="agent-turn agent-turn-system">
+              <span className="agent-activity">{t('agent.thinking')}</span>
+            </div>
+          )}
+          <div ref={endRef} className="agent-messages-end" aria-hidden />
+        </div>
       </div>
 
-      {pending && (
-        <AgentConfirmPanel
-          pending={pending}
-          onApprove={() => onConfirm(true)}
-          onReject={() => onConfirm(false)}
-        />
+      {showActionRail && choiceQuestions && choiceQuestions.length > 0 && (
+        <div className="agent-action-rail" role="region" aria-label={t('agent.actionRail')}>
+          <AgentChoicePanel
+            questions={choiceQuestions}
+            disabled={sessionPhase === 'streaming' || sessionPhase === 'tools'}
+            onSubmit={onChoiceSubmit}
+          />
+        </div>
       )}
 
+      {chatMode === 'plan' ? (
+        <div className="agent-mode-banner" role="status">
+          {t('agent.planModeBanner')}
+          <button
+            type="button"
+            className="wn-btn wn-btn-xs wn-btn-primary"
+            {...pressProps(() => onModeChange('agent'))}
+          >
+            {t('agent.switchToAgent')}
+          </button>
+        </div>
+      ) : null}
+
       <AgentInputBar
-        busy={busy}
+        active={active}
         threadId={threadId}
         autoMentions={autoMentions}
         threadMentions={threadMentions}

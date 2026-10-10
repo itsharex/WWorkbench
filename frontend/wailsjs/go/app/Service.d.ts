@@ -23,6 +23,8 @@ export function ApplyTableMutations(arg1:string,arg2:string,arg3:string,arg4:mod
 
 export function BatchDeleteHTTP(arg1:Array<string>,arg2:Array<string>):Promise<app.ApiResult_bool_>;
 
+export function BuildPluginPackUI(arg1:string):Promise<app.ApiResult_WWorkbench_internal_pluginpack_BuildResult_>;
+
 export function CancelSFTPTask(arg1:string):Promise<app.ApiResult_bool_>;
 
 export function CancelSQLExport(arg1:string):Promise<app.ApiResult_bool_>;
@@ -84,6 +86,8 @@ export function DeleteSSHForwardPreset(arg1:string):Promise<app.ApiResult_bool_>
 export function DeleteSSHHost(arg1:string):Promise<app.ApiResult_bool_>;
 
 export function DownloadSFTPFile(arg1:string,arg2:string):Promise<app.ApiResult_WWorkbench_internal_model_TransferResultDO_>;
+
+export function DrainAgentWritePending(arg1:string):Promise<app.ApiResult_int_>;
 
 export function DropDatabase(arg1:string,arg2:string):Promise<app.ApiResult_bool_>;
 
@@ -152,6 +156,12 @@ export function GetNote(arg1:string):Promise<app.ApiResult_WWorkbench_internal_m
 export function GetNotebookUI():Promise<app.ApiResult_WWorkbench_internal_model_NotebookUIDO_>;
 
 export function GetObjectTree(arg1:string):Promise<app.ApiResult___WWorkbench_internal_model_ObjectTreeNodeDO_>;
+
+export function GetPluginPack(arg1:string):Promise<app.ApiResult_WWorkbench_internal_pluginpack_PackInfo_>;
+
+export function GetPluginPackSourcePath(arg1:string):Promise<app.ApiResult_string_>;
+
+export function GetPluginProtocol():Promise<app.ApiResult_WWorkbench_internal_app_PluginProtocolDO_>;
 
 export function GetSFTPHome(arg1:string):Promise<app.ApiResult_string_>;
 
@@ -227,6 +237,10 @@ export function ListNotebookGroups():Promise<app.ApiResult___WWorkbench_internal
 
 export function ListNotes():Promise<app.ApiResult___WWorkbench_internal_model_NoteSummaryDO_>;
 
+export function ListPluginPackReleases(arg1:string):Promise<app.ApiResult___WWorkbench_internal_pluginpack_ReleaseInfo_>;
+
+export function ListPluginPacks():Promise<app.ApiResult___WWorkbench_internal_pluginpack_PackInfo_>;
+
 export function ListQueryHistory(arg1:string,arg2:number):Promise<app.ApiResult___WWorkbench_internal_model_QueryHistoryDO_>;
 
 export function ListSFTPBookmarks(arg1:string,arg2:string):Promise<app.ApiResult___WWorkbench_internal_model_SftpBookmarkDO_>;
@@ -275,6 +289,8 @@ export function PublishAgentSkill(arg1:model.AgentSkillPublishDO):Promise<app.Ap
 
 export function QuerySQLPage(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number):Promise<app.ApiResult_WWorkbench_internal_model_QueryPageDO_>;
 
+export function ReadPluginPackUIFile(arg1:string,arg2:string):Promise<app.ApiResult_string_>;
+
 export function ReadSFTPBinary(arg1:string,arg2:string):Promise<app.ApiResult_WWorkbench_internal_model_SFTPBinaryFileDO_>;
 
 export function ReadSFTPText(arg1:string,arg2:string):Promise<app.ApiResult_WWorkbench_internal_model_SFTPTextFileDO_>;
@@ -292,6 +308,10 @@ export function ResizeTerminal(arg1:string,arg2:number,arg3:number):Promise<app.
 export function ResolveContainerDatabaseLink(arg1:string,arg2:string):Promise<app.ApiResult_WWorkbench_internal_model_ContainerDatabaseLinkDO_>;
 
 export function RestartContainer(arg1:string,arg2:string):Promise<app.ApiResult_bool_>;
+
+export function RevealPluginPackPath(arg1:string):Promise<app.ApiResult_bool_>;
+
+export function RollbackPluginPack(arg1:string,arg2:string):Promise<app.ApiResult_WWorkbench_internal_pluginpack_PackInfo_>;
 
 export function RunContainer(arg1:string,arg2:model.ContainerRunDO):Promise<app.ApiResult_WWorkbench_internal_model_ContainerDO_>;
 
@@ -343,11 +363,17 @@ export function SetAgentSkillEnabled(arg1:model.AgentSkillEnabledDO):Promise<app
 
 export function SetAgentThreadBindings(arg1:string,arg2:Array<model.AgentMentionDO>):Promise<app.ApiResult_bool_>;
 
+export function SetAgentThreadMode(arg1:string,arg2:string):Promise<app.ApiResult_bool_>;
+
 export function SetAgentThreadSkillIDs(arg1:string,arg2:Array<string>):Promise<app.ApiResult_bool_>;
 
 export function SetAppSetting(arg1:string,arg2:string):Promise<app.ApiResult_bool_>;
 
 export function SetDatabase(arg1:string,arg2:string):Promise<app.ApiResult_WWorkbench_internal_model_SessionInfoDO_>;
+
+export function SetPluginPackEnabled(arg1:string,arg2:boolean):Promise<app.ApiResult_WWorkbench_internal_pluginpack_PackInfo_>;
+
+export function SnapshotPluginPack(arg1:string):Promise<app.ApiResult_WWorkbench_internal_pluginpack_ReleaseInfo_>;
 
 export function StartContainer(arg1:string,arg2:string):Promise<app.ApiResult_bool_>;
 

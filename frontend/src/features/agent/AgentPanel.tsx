@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { subscribeAgentEvents } from '../../api/agentEvents'
 import { useI18n } from '../../i18n'
 import { useAppStore } from '../../stores/appStore'
 import { useLoading, withLoading } from '../../stores/loadingStore'
-import { nextAgentLineId, useAgentStore, type AgentChatLine, type AgentToolStep } from '../../stores/agentStore'
-import { model } from '../../../wailsjs/go/models'
-import type { AgentConfirmEvent, AgentOfferChoicesEvent } from '../../api/agentEvents'
+import { useAgentStore } from '../../stores/agentStore'
 import type { AgentPanelView, CapabilityRow } from './agentTypes'
 import { AgentConfigView, saveAgentAPIConfig } from './AgentConfigView'
 import { rememberRecentModel } from './agentChatMode'
@@ -17,16 +14,10 @@ import { useAgentChatScroll } from './useAgentChatScroll'
 import { subscribeCommandResults } from './agentUiActions'
 import { AgentChatPane } from './AgentChatPane'
 import { AgentThreadHistory } from './AgentThreadHistory'
-import {
-  buildAutoMentions,
-  filterEphemeralAutoMentions,
-  mergeMentions,
-  parseMentionsFromEvent,
-  toContextMentions,
-  type AgentMention,
-} from './agentMention'
-import { saveReplyToNotebook } from './saveReplyToNotebook'
-import { buildSkillLabelMap, mergeSkillIds } from './agentSkillIds'
+import { mergeMentions } from './agentMention'
+import { buildSkillLabelMap } from './agentSkillIds'
+import { useAgentSession } from './useAgentSession'
+import { pressProps } from '../../components/compat'
 
 interface AgentThreadItem {
   id: string
@@ -37,43 +28,17 @@ interface AgentThreadItem {
 /** AgentPanel 全局 AI Copilot 侧栏（收起保留对话，Tab 切换设置）。 */
 export function AgentPanel({ collapsed }: { collapsed: boolean }) {
   const { t } = useI18n()
-  const {
-    activeProduct,
-    session,
-    activeConnectionId,
-    connections,
-    agentSurface,
-    setStatusMessage,
-  } = useAppStore()
+  const { setStatusMessage } = useAppStore()
   const view = useAgentStore((s) => s.view)
   const setView = useAgentStore((s) => s.setView)
-  const threadId = useAgentStore((s) => s.threadId)
-  const setThreadId = useAgentStore((s) => s.setThreadId)
   const lines = useAgentStore((s) => s.lines)
-  const appendLine = useAgentStore((s) => s.appendLine)
-  const setLines = useAgentStore((s) => s.setLines)
-  const resetThread = useAgentStore((s) => s.resetThread)
-  const beginStreaming = useAgentStore((s) => s.beginStreaming)
-  const appendStreamDelta = useAgentStore((s) => s.appendStreamDelta)
-  const finishStreaming = useAgentStore((s) => s.finishStreaming)
-  const cancelStreaming = useAgentStore((s) => s.cancelStreaming)
-  const pushToolStep = useAgentStore((s) => s.pushToolStep)
-  const finishToolStep = useAgentStore((s) => s.finishToolStep)
-  const clearToolSteps = useAgentStore((s) => s.clearToolSteps)
-  const threadMentions = useAgentStore((s) => s.threadMentions)
-  const threadSkillIds = useAgentStore((s) => s.threadSkillIds)
-  const setThreadSkillIds = useAgentStore((s) => s.setThreadSkillIds)
-  const setPendingTurnSkillIds = useAgentStore((s) => s.setPendingTurnSkillIds)
-  const setThreadMentions = useAgentStore((s) => s.setThreadMentions)
-  const chatMode = useAgentStore((s) => s.chatMode)
-  const setChatMode = useAgentStore((s) => s.setChatMode)
+  const streamingDraft = useAgentStore((s) => s.streamingDraft)
+  const revealingLineId = useAgentStore((s) => s.revealingLineId)
+  const sessionPhase = useAgentStore((s) => s.sessionPhase)
+  const pendingChoice = useAgentStore((s) => s.pendingChoice)
 
   const [showHistory, setShowHistory] = useState(false)
   const [threads, setThreads] = useState<AgentThreadItem[]>([])
-
-  const [busy, setBusy] = useState(false)
-  const [pending, setPending] = useState<AgentConfirmEvent | null>(null)
-  const [pendingChoice, setPendingChoice] = useState<AgentOfferChoicesEvent | null>(null)
   const [skillCatalog, setSkillCatalog] = useState<Record<string, string>>({})
 
   const [apiBase, setApiBase] = useState('https://dashscope.aliyuncs.com/compatible-mode/v1')
@@ -92,20 +57,44 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
   const testLoading = useLoading('agent.testConnection')
   const { width, onResizeStart } = useAgentPanelResize()
 
-  const streamingDraft = useAgentStore((s) => s.streamingDraft)
+  // 滚动 key：草稿按块节流，避免每 token 同步贴底打满主线程（增高靠 ResizeObserver）
   const scrollContentKey = [
     lines
-      .map((l) => `${l.id}:${l.content.length}:${(l.tools || []).map((tool) => tool.status).join(',')}`)
+      .map(
+        (l) =>
+          `${l.id}:${l.content.length}:${l.contentAfter?.length ?? 0}:${(l.tools || []).length}:${(l.tools || [])
+            .map((tool) => tool.status)
+            .join(',')}`,
+      )
       .join('|'),
-    streamingDraft.length,
-    pending?.pendingId ?? '',
+    Math.floor(streamingDraft.length / 48),
     pendingChoice?.pendingId ?? '',
-    busy ? '1' : '0',
+    sessionPhase,
   ].join('#')
-  const { scrollRef, onScroll: onMessagesScroll, pinToBottom } = useAgentChatScroll(
-    view === 'chat' && !collapsed && !showHistory,
+
+  const forceStick =
+    sessionPhase === 'streaming' ||
+    sessionPhase === 'tools' ||
+    Boolean(revealingLineId) ||
+    streamingDraft.length > 0
+
+  const { scrollRef, endRef, onScroll: onMessagesScroll, pinToBottom } = useAgentChatScroll(
+    view === 'chat' && !collapsed,
     scrollContentKey,
+    forceStick,
   )
+
+  const session = useAgentSession({ collapsed, pinToBottom })
+
+  const runningToolCount = useAgentStore((s) => {
+    let n = 0
+    for (const ln of s.lines) {
+      for (const step of ln.tools || []) {
+        if (step.status === 'running') n += 1
+      }
+    }
+    return n
+  })
 
   const switchView = (next: AgentPanelView) => {
     if (next === 'config') setConfigError('')
@@ -131,7 +120,6 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
           risk: c.risk,
           description: c.description,
           enabled: c.enabled,
-          needsConfirm: c.needsConfirm,
         })),
       )
     } else {
@@ -143,7 +131,6 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
           risk: c.risk,
           description: c.description,
           enabled: c.enabled,
-          needsConfirm: c.needsConfirm,
         })),
       )
     }
@@ -171,73 +158,6 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
     }
   }, [t])
 
-  const openThread = useCallback(
-    async (id: string) => {
-      setThreadId(id)
-      setPending(null)
-      setPendingChoice(null)
-      setBusy(false)
-      setThreadSkillIds([])
-      pinToBottom()
-      try {
-        const [msgs, detail] = await Promise.all([
-          api.listAgentMessages(id),
-          api.getAgentThread(id),
-        ])
-        setLines(
-          msgs.map((m) => ({
-            id: nextAgentLineId(),
-            role: (m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user') as AgentChatLine['role'],
-            content: m.content ?? '',
-            skillIds: Array.isArray(m.skillIds) ? m.skillIds.filter(Boolean) : undefined,
-            images: Array.isArray(m.images)
-              ? m.images.map((img) => ({ mime: img.mime ?? '', data: img.data ?? '' })).filter((img) => img.data)
-              : undefined,
-            seq: typeof m.seq === 'number' && m.seq > 0 ? m.seq : undefined,
-            tools: Array.isArray(m.tools)
-              ? m.tools
-                  .map((t, i) => ({
-                    id: String(t.id || `${m.seq || 0}-tool-${i}`),
-                    tool: String(t.name || ''),
-                    status: (t.status || '') as AgentToolStep['status'],
-                    argsPreview: t.args ? String(t.args) : undefined,
-                    summary: t.summary ? String(t.summary) : undefined,
-                  }))
-                  .filter((t) => t.tool)
-              : undefined,
-          })),
-        )
-        const ctxSkills = detail?.context?.skillIds
-        if (Array.isArray(ctxSkills) && ctxSkills.length > 0) {
-          setThreadSkillIds(ctxSkills.filter(Boolean))
-        } else {
-          const lastUser = [...msgs]
-            .reverse()
-            .find((m) => m.role === 'user' && Array.isArray(m.skillIds) && m.skillIds.length)
-          if (lastUser?.skillIds?.length) setThreadSkillIds(lastUser.skillIds.filter(Boolean))
-        }
-        setThreadMentions(parseMentionsFromEvent(detail?.context?.mentions))
-      } catch (e) {
-        setStatusMessage((e as Error).message)
-      }
-      setShowHistory(false)
-      setView('chat')
-    },
-    [setThreadId, setLines, setView, setStatusMessage, setThreadMentions, setThreadSkillIds, pinToBottom],
-  )
-
-  const threadBooted = useRef(false)
-  useEffect(() => {
-    if (collapsed || threadBooted.current) return
-    const id = useAgentStore.getState().threadId
-    if (!id || lines.length > 0) {
-      threadBooted.current = true
-      return
-    }
-    threadBooted.current = true
-    void openThread(id)
-  }, [collapsed, lines.length, openThread])
-
   useEffect(() => {
     if (view === 'chat' && showHistory) void loadThreadList()
   }, [view, showHistory, loadThreadList])
@@ -249,271 +169,8 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
     return unsub
   }, [setStatusMessage])
 
-  useEffect(() => {
-    const isActiveThread = (eventThreadId: string) =>
-      !!eventThreadId && eventThreadId === useAgentStore.getState().threadId
-
-    const adoptThread = (eventThreadId: string, mentions?: unknown) => {
-      if (!eventThreadId) return
-      const cur = useAgentStore.getState().threadId
-      if (eventThreadId === cur) return
-      setThreadId(eventThreadId)
-      setLines([])
-      clearToolSteps()
-      setPending(null)
-      setPendingChoice(null)
-      setBusy(true)
-      pinToBottom()
-      if (mentions !== undefined) {
-        setThreadMentions(parseMentionsFromEvent(mentions))
-      }
-    }
-
-    const unsub = subscribeAgentEvents({
-      onUser: (evt) => {
-        adoptThread(evt.threadId, evt.mentions)
-        clearToolSteps()
-        appendLine({
-          id: nextAgentLineId(),
-          role: 'user',
-          content: evt.content === '（图片）' ? '' : evt.content,
-          mentions: parseMentionsFromEvent(evt.mentions),
-          skillIds: evt.skillIds,
-          images: evt.images,
-          seq: evt.seq,
-        })
-        if (evt.skillIds?.length) setThreadSkillIds(evt.skillIds)
-      },
-      onAssistantDelta: (tid, delta) => {
-        if (!isActiveThread(tid)) return
-        const { streamingLineId } = useAgentStore.getState()
-        if (!streamingLineId) beginStreaming()
-        appendStreamDelta(delta)
-      },
-      onAssistant: (evt) => {
-        if (!isActiveThread(evt.threadId)) return
-        const { streamingLineId } = useAgentStore.getState()
-        if (streamingLineId) {
-          finishStreaming(evt.content, evt.seq)
-        } else if (evt.content) {
-          appendLine({
-            id: nextAgentLineId(),
-            role: 'assistant',
-            content: evt.content,
-            skillIds: evt.skillIds,
-            seq: evt.seq,
-          })
-        }
-      },
-      onToolStart: (evt) => {
-        if (!isActiveThread(evt.threadId)) return
-        cancelStreaming()
-        const args = evt.args?.trim()
-        pushToolStep(evt.tool, args && args.length > 96 ? `${args.slice(0, 93)}…` : args)
-      },
-      onToolEnd: (evt) => {
-        if (!isActiveThread(evt.threadId)) return
-        const st = (evt.status || 'ok') as
-          | 'ok'
-          | 'error'
-          | 'denied'
-          | 'need_confirm'
-          | 'need_choice'
-        finishToolStep(evt.tool, st, evt.summary)
-      },
-      onNeedsConfirm: (evt) => {
-        if (!isActiveThread(evt.threadId)) return
-        finishToolStep(evt.tool, 'need_confirm', evt.summary)
-        setPending(evt)
-        setBusy(false)
-      },
-      onOfferChoices: (evt) => {
-        if (!isActiveThread(evt.threadId)) return
-        finishToolStep('offer_choices', 'need_choice', evt.summary)
-        setPendingChoice(evt)
-        setBusy(false)
-      },
-      onDone: (evt) => {
-        if (!isActiveThread(evt.threadId)) return
-        setBusy(false)
-        cancelStreaming()
-        for (const ln of useAgentStore.getState().lines) {
-          for (const step of ln.tools || []) {
-            if (step.status === 'running') {
-              finishToolStep(step.tool, evt.error ? 'error' : 'ok', evt.error)
-            }
-          }
-        }
-        if (evt.stopped) {
-          appendLine({ id: nextAgentLineId(), role: 'system', content: t('agent.stopped') })
-        } else if (evt.error) {
-          appendLine({ id: nextAgentLineId(), role: 'system', content: evt.error ?? '' })
-          setStatusMessage(evt.error)
-        }
-        if (!evt.waitingConfirm) setPending(null)
-        if (!evt.waitingChoice) setPendingChoice(null)
-      },
-    })
-    return unsub
-  }, [
-    t,
-    setStatusMessage,
-    setThreadId,
-    setLines,
-    setThreadMentions,
-    appendLine,
-    beginStreaming,
-    appendStreamDelta,
-    finishStreaming,
-    cancelStreaming,
-    clearToolSteps,
-    pushToolStep,
-    finishToolStep,
-    pinToBottom,
-  ])
-
-  const autoMentions = buildAutoMentions({
-    activeProduct,
-    surface: agentSurface,
-    activeConnectionId,
-    sessionConnectionId: session?.connectionId,
-    connections: connections.map((c) => ({
-      id: c.id,
-      name: c.name,
-      host: c.host,
-      dbType: c.dbType,
-    })),
-  })
-
-  const buildContext = (mentions: AgentMention[]) => {
-    return model.AgentContextDO.createFrom({
-      activeProduct,
-      sessionId: session?.sessionId ?? agentSurface.sessionId ?? '',
-      connectionId: activeConnectionId ?? session?.connectionId ?? agentSurface.connectionId ?? '',
-      database: agentSurface.database || session?.database || '',
-      table: agentSurface.table || '',
-      focusKind: agentSurface.focusKind || '',
-      focusLabel: agentSurface.focusLabel || '',
-      tabTitle: agentSurface.tabTitle || '',
-      openTabsBrief: agentSurface.openTabsBrief || '',
-      selectionBrief: agentSurface.selectionBrief || '',
-      noteId: agentSurface.noteId || '',
-      mentions: toContextMentions(mentions),
-    })
-  }
-
-  const stopGeneration = async () => {
-    if (!threadId) return
-    try {
-      await api.agentStop(threadId)
-    } catch (e) {
-      setStatusMessage((e as Error).message)
-    }
-  }
-
-  const unbindThreadMention = async (id: string, kind: AgentMention['kind']) => {
-    const next = threadMentions.filter((m) => !(m.id === id && m.kind === kind))
-    setThreadMentions(next)
-    if (!threadId) return
-    try {
-      await api.setAgentThreadBindings(threadId, next)
-    } catch (e) {
-      setThreadMentions(threadMentions)
-      setStatusMessage((e as Error).message)
-    }
-  }
-
   const toggleCapability = (name: string) => {
     setCapabilities((prev) => prev.map((c) => (c.name === name ? { ...c, enabled: !c.enabled } : c)))
-  }
-
-  const unbindThreadSkill = (id: string) => {
-    const next = threadSkillIds.filter((s) => s !== id)
-    setThreadSkillIds(next)
-    if (!threadId) return
-    void api.setAgentThreadSkillIds(threadId, next).catch((e) => setStatusMessage((e as Error).message))
-  }
-
-  const send = async (
-    text: string,
-    mentions: AgentMention[],
-    images: { mime: string; data: string }[] = [],
-    skillIds: string[] = [],
-    modeOverride?: typeof chatMode,
-  ) => {
-    if ((!text.trim() && images.length === 0) || busy) return
-    const allSkillIds = mergeSkillIds(threadSkillIds, skillIds)
-    const mode = modeOverride ?? chatMode
-    if (modeOverride && modeOverride !== chatMode) setChatMode(modeOverride)
-    clearToolSteps()
-    setBusy(true)
-    setPending(null)
-    setPendingChoice(null)
-    setPendingTurnSkillIds(allSkillIds)
-    if (allSkillIds.length > 0) setThreadSkillIds(allSkillIds)
-    pinToBottom()
-    try {
-      const ephemeralAuto = filterEphemeralAutoMentions(autoMentions, mentions)
-      const contextMentions = mergeMentions(mentions, ephemeralAuto)
-      const res = await api.agentChat(
-        model.AgentChatRequestDO.createFrom({
-          threadId,
-          message: text.trim(),
-          images: images.map((img) => ({ mime: img.mime, data: img.data })),
-          mode,
-          skillIds: allSkillIds.length ? allSkillIds : undefined,
-          context: buildContext(contextMentions),
-        }),
-      )
-      if (res.threadId) setThreadId(res.threadId)
-      setThreadMentions(mentions)
-    } catch (e) {
-      setBusy(false)
-      const msg = (e as Error).message || t('agent.sendFailed')
-      appendLine({ id: nextAgentLineId(), role: 'system', content: msg })
-      setStatusMessage(msg)
-      if (/API Key|模型名称|AI 设置|api key|model/i.test(msg)) {
-        setConfigError(msg)
-        setView('config')
-      }
-      throw e
-    }
-  }
-
-  const confirmPending = async (approved: boolean) => {
-    if (!pending) return
-    const id = pending.pendingId
-    setPending(null)
-    setBusy(true)
-    try {
-      await api.agentConfirm(id, approved)
-    } catch (e) {
-      setBusy(false)
-      setStatusMessage((e as Error).message)
-    }
-  }
-
-  const submitChoice = async (answers: { pendingId?: string; keys: string[]; text: string }[]) => {
-    if (!pendingChoice) return
-    const payload = answers
-      .filter((a) => a.pendingId)
-      .map(
-        (a) =>
-          ({
-            pendingId: a.pendingId!,
-            keys: a.keys,
-            text: a.text,
-          }) satisfies model.AgentChoiceAnswerDO,
-      )
-    if (payload.length === 0) return
-    setPendingChoice(null)
-    setBusy(true)
-    try {
-      await api.agentChoose(payload)
-    } catch (e) {
-      setBusy(false)
-      setStatusMessage((e as Error).message)
-    }
   }
 
   const handleSaveConfig = async () => {
@@ -577,7 +234,7 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
     )
   }
 
-  const applyPreset = async (id: 'bailian' | 'deepseek' | 'minimax') => {
+  const applyPreset = async (id: 'bailian' | 'deepseek' | 'minimax' | 'cursor') => {
     try {
       const s = await api.applyAgentProviderPreset(id)
       setApiBase(s.apiBase)
@@ -588,18 +245,13 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
           ? 'agent.deepseekPresetApplied'
           : id === 'minimax'
             ? 'agent.minimaxPresetApplied'
-            : 'agent.bailianPresetApplied'
+            : id === 'cursor'
+              ? 'agent.cursorPresetApplied'
+              : 'agent.bailianPresetApplied'
       setStatusMessage(t(msgKey))
     } catch (e) {
       setStatusMessage((e as Error).message)
     }
-  }
-
-  const newThread = () => {
-    resetThread()
-    setPending(null)
-    setPendingChoice(null)
-    setBusy(false)
   }
 
   const switchModel = async (id: string) => {
@@ -637,11 +289,16 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
                 <button
                   type="button"
                   className={`wn-btn wn-btn-xs wn-btn-ghost${showHistory ? ' active' : ''}`}
-                  onClick={() => setShowHistory((v) => !v)}
+                  {...pressProps(() => setShowHistory((v) => !v))}
                 >
                   {t('agent.history')}
                 </button>
-                <button type="button" className="wn-btn wn-btn-xs wn-btn-ghost" onClick={newThread} title={t('agent.newThread')}>
+                <button
+                  type="button"
+                  className="wn-btn wn-btn-xs wn-btn-ghost"
+                  {...pressProps(session.newThread)}
+                  title={t('agent.newThread')}
+                >
                   {t('agent.newThread')}
                 </button>
               </>
@@ -657,7 +314,7 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
               role="tab"
               aria-selected={view === tab.id}
               className={`agent-panel-tab${view === tab.id ? ' is-active' : ''}`}
-              onClick={() => switchView(tab.id)}
+              {...pressProps(() => switchView(tab.id))}
             >
               {tab.label}
             </button>
@@ -696,68 +353,73 @@ export function AgentPanel({ collapsed }: { collapsed: boolean }) {
           />
         )}
 
-        {view === 'chat' && showHistory && (
-          <AgentThreadHistory
-            threads={threads}
-            activeThreadId={threadId}
-            emptyHint={t('agent.noHistory')}
-            onOpen={(id) => void openThread(id)}
-          />
-        )}
-
-        {view === 'chat' && !showHistory && (
-          <AgentChatPane
-            t={t}
-            lines={lines}
-            busy={busy}
-            chatMode={chatMode}
-            skillCatalog={skillCatalog}
-            threadMentions={threadMentions}
-            threadSkillIds={threadSkillIds}
-            autoMentions={autoMentions}
-            pending={pending}
-            pendingChoice={pendingChoice}
-            threadId={threadId}
-            modelName={modelName}
-            provider={provider}
-            scrollRef={scrollRef}
-            onMessagesScroll={onMessagesScroll}
-            onChoiceDraft={(text) => {
-              useAgentStore.getState().applyDraft({
-                message: text,
-                mentions: threadMentions,
-                skillIds: threadSkillIds,
-              })
-            }}
-            onChoiceSubmit={(answers) => void submitChoice(answers)}
-            onSaveToNotebook={(content) => {
-              void saveReplyToNotebook(content, mergeMentions(threadMentions, autoMentions))
-                .then((msg) => setStatusMessage(t(`agent.${msg}`)))
-                .catch((e) => setStatusMessage((e as Error).message))
-            }}
-            onConfirm={(ok) => void confirmPending(ok)}
-            onModeChange={setChatMode}
-            onModelChange={(id) => void switchModel(id)}
-            onSend={(text, mentions, images, skillIds, mode) =>
-              send(text, mentions, images, skillIds ?? [], mode)
-            }
-            onStop={() => void stopGeneration()}
-            onUnbindThreadMention={(id, kind) => void unbindThreadMention(id, kind)}
-            onUnbindThreadSkill={unbindThreadSkill}
-            onSuggest={(item) => {
-              if (item.goTerminal) {
-                useAppStore.getState().setActiveProduct('terminal')
-                return
+        {view === 'chat' && (
+          <div className="agent-chat-stage">
+            <AgentChatPane
+              t={t}
+              lines={session.lines}
+              sessionPhase={session.sessionPhase}
+              active={session.active}
+              runningToolCount={runningToolCount}
+              chatMode={session.chatMode}
+              skillCatalog={skillCatalog}
+              threadMentions={session.threadMentions}
+              threadSkillIds={session.threadSkillIds}
+              autoMentions={session.autoMentions}
+              choiceQuestions={session.choiceQuestions}
+              threadId={session.threadId}
+              modelName={modelName}
+              provider={provider}
+              scrollRef={scrollRef}
+              endRef={endRef}
+              onMessagesScroll={onMessagesScroll}
+              onChoiceSubmit={(answers) => void session.submitChoice(answers)}
+              onModeChange={session.handleModeChange}
+              onModelChange={(id) => void switchModel(id)}
+              onSend={(text, mentions, images, skillIds, mode) =>
+                session.send(text, mentions, images, skillIds ?? [], mode)
               }
-              void send(
-                item.message,
-                mergeMentions(threadMentions, autoMentions),
-                [],
-                [],
-                item.mode,
-              )
-            }}
-          />
+              onStop={() => void session.stopGeneration()}
+              onUnbindThreadMention={(id, kind) => void session.unbindThreadMention(id, kind)}
+              onUnbindThreadSkill={session.unbindThreadSkill}
+              onSuggest={(item) => {
+                if (item.goTerminal) {
+                  useAppStore.getState().setActiveProduct('terminal')
+                  return
+                }
+                void session.send(
+                  item.message,
+                  mergeMentions(session.threadMentions, session.autoMentions),
+                  [],
+                  [],
+                  item.mode,
+                )
+              }}
+            />
+            {showHistory && (
+              <div className="agent-history-drawer" role="dialog" aria-label={t('agent.history')}>
+                <div className="agent-history-drawer-head">
+                  <span>{t('agent.history')}</span>
+                  <button
+                    type="button"
+                    className="wn-btn wn-btn-xs wn-btn-ghost"
+                    {...pressProps(() => setShowHistory(false))}
+                  >
+                    {t('agent.closeHistory')}
+                  </button>
+                </div>
+                <AgentThreadHistory
+                  threads={threads}
+                  activeThreadId={session.threadId}
+                  emptyHint={t('agent.noHistory')}
+                  onOpen={(id) => {
+                    setShowHistory(false)
+                    void session.openThread(id)
+                  }}
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
     </aside>

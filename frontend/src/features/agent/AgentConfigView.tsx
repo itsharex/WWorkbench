@@ -4,7 +4,8 @@ import { api } from '../../api/client'
 import { model } from '../../../wailsjs/go/models'
 import { Select } from '../../components/compat'
 
-export type AgentProviderId = 'bailian' | 'deepseek' | 'minimax' | string
+export type AgentProviderPresetId = 'bailian' | 'deepseek' | 'minimax' | 'cursor'
+export type AgentProviderId = AgentProviderPresetId | string
 
 export interface AgentConfigViewProps {
   apiBase: string
@@ -18,18 +19,20 @@ export interface AgentConfigViewProps {
   error: string
   saving: boolean
   testing: boolean
-  onApplyPreset: (provider: 'bailian' | 'deepseek' | 'minimax') => void
+  onApplyPreset: (provider: AgentProviderPresetId) => void
   onTest: () => void
   onSave: () => void
 }
 
-const PRESETS: { id: 'bailian' | 'deepseek' | 'minimax'; labelKey: string }[] = [
+const PRESETS: { id: AgentProviderPresetId; labelKey: string }[] = [
   { id: 'bailian', labelKey: 'agent.bailianPreset' },
   { id: 'deepseek', labelKey: 'agent.deepseekPreset' },
   { id: 'minimax', labelKey: 'agent.minimaxPreset' },
+  { id: 'cursor', labelKey: 'agent.cursorPreset' },
 ]
 
 const DEEPSEEK_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash'] as const
+const CURSOR_MODELS = ['composer-2.5', 'composer-2'] as const
 
 /** providerLabel 服务商标签文案。 */
 export function providerLabel(provider: string, t: (key: string) => string): string {
@@ -40,6 +43,8 @@ export function providerLabel(provider: string, t: (key: string) => string): str
       return t('agent.providerDeepseek')
     case 'minimax':
       return t('agent.providerMinimax')
+    case 'cursor':
+      return t('agent.providerCursor')
     default:
       return t('agent.providerOther')
   }
@@ -54,6 +59,8 @@ function providerHint(provider: string, t: (key: string) => string): string {
       return t('agent.minimaxHint')
     case 'bailian':
       return t('agent.bailianHint')
+    case 'cursor':
+      return t('agent.cursorHint')
     default:
       return t('agent.openaiCompatHint')
   }
@@ -68,6 +75,8 @@ function modelPlaceholder(provider: string): string {
       return 'MiniMax-M2.5 / MiniMax-M3'
     case 'bailian':
       return 'qwen-plus / qwen-turbo'
+    case 'cursor':
+      return 'composer-2.5'
     default:
       return 'model-id'
   }
@@ -78,6 +87,13 @@ function deepseekModelValue(modelName: string): string {
   return (DEEPSEEK_MODELS as readonly string[]).includes(modelName)
     ? modelName
     : DEEPSEEK_MODELS[0]
+}
+
+/** cursorModelValue 规范化 Cursor 模型选择值。 */
+function cursorModelValue(modelName: string): string {
+  return (CURSOR_MODELS as readonly string[]).includes(modelName)
+    ? modelName
+    : CURSOR_MODELS[0]
 }
 
 async function copyText(text: string) {
@@ -174,9 +190,13 @@ export function AgentConfigView({
         </button>
         <span className="agent-provider-tag">{providerLabel(provider, t)}</span>
       </div>
-      <label className="wn-label">{t('agent.apiBase')}</label>
-      <input className="wn-input" value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
-      <label className="wn-label">{t('agent.apiKey')}</label>
+      {provider !== 'cursor' && (
+        <>
+          <label className="wn-label">{t('agent.apiBase')}</label>
+          <input className="wn-input" value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
+        </>
+      )}
+      <label className="wn-label">{provider === 'cursor' ? t('agent.cursorApiKey') : t('agent.apiKey')}</label>
       <input
         className="wn-input"
         type="password"
@@ -189,6 +209,12 @@ export function AgentConfigView({
         <Select
           value={deepseekModelValue(modelName)}
           options={DEEPSEEK_MODELS.map((id) => ({ value: id, label: id }))}
+          onChange={setModelName}
+        />
+      ) : provider === 'cursor' ? (
+        <Select
+          value={cursorModelValue(modelName)}
+          options={CURSOR_MODELS.map((id) => ({ value: id, label: id }))}
           onChange={setModelName}
         />
       ) : (
@@ -266,10 +292,17 @@ export function buildAPIConfigSave(
   modelName: string,
   provider: string,
 ) {
+  const trimmed = modelName.trim()
   const resolvedModel =
-    provider === 'deepseek' ? deepseekModelValue(modelName.trim()) : modelName.trim()
+    provider === 'deepseek'
+      ? deepseekModelValue(trimmed)
+      : provider === 'cursor'
+        ? cursorModelValue(trimmed)
+        : trimmed
+  const base =
+    provider === 'cursor' ? 'cursor-sdk-bridge://local' : apiBase.trim()
   return model.AgentAPIConfigSaveDO.createFrom({
-    apiBase: apiBase.trim(),
+    apiBase: base,
     apiKey: apiKey.trim(),
     model: resolvedModel,
     provider,

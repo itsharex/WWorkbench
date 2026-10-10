@@ -57,7 +57,7 @@
 }
 
 .database-side-panel .conn-item {
-  min-height: 38px;
+  min-height: 26px;
 }
 
 .database-side-panel .conn-item.active {
@@ -82,7 +82,10 @@
 }
 
 .database-side-panel .wn-tree-item {
-  min-height: 26px;
+  min-height: var(--list-row-height, 22px);
+  height: var(--list-row-height, 22px);
+  margin: 0 4px;
+  padding-block: 0;
 }
 
 .database-side-panel .wn-tree-item.selected {
@@ -90,7 +93,7 @@
 }
 
 .database-toolbar {
-  border-bottom: none;
+  border-bottom: 1px solid var(--color-divider);
 }
 
 .database-toolbar .product-actions {
@@ -159,7 +162,7 @@
 }
 
 .database-side-panel .conn-item {
-  min-height: 34px;
+  min-height: 26px;
 }
 
 .database-side-panel .conn-item .conn-name {
@@ -175,9 +178,10 @@
 }
 
 .database-side-panel .wn-tree-item {
-  min-height: 24px;
-  margin: 1px 6px;
-  padding-block: 2px;
+  min-height: var(--list-row-height, 22px);
+  height: var(--list-row-height, 22px);
+  margin: 0 4px;
+  padding-block: 0;
   border-radius: var(--radius-sm);
 }
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"WWorkbench/internal/agentcap"
+	"WWorkbench/internal/cursorbridge"
 	"WWorkbench/internal/harness"
 	"WWorkbench/internal/model"
 	"WWorkbench/internal/store"
@@ -49,6 +51,21 @@ type Runner struct {
 	appCtx  context.Context
 	runs    map[string]context.CancelFunc
 	runsMu  sync.Mutex
+
+	cursorMu           sync.Mutex
+	cursorSess         *cursorbridge.Session
+	cursorActiveThread string
+	// cursorTurnCtx 本轮 turn 的 ctx；工具回调勿用 HTTP r.Context，否则回调断开会误杀整轮。
+	cursorTurnCtx context.Context
+	// cursorTurnBuf 本轮 Cursor 工具轨迹，Send 结束后按 guest 顺序落 history。
+	cursorTurnBuf []cursorHistTool
+}
+
+// cursorHistTool Cursor 回调缓冲：先跑工具，再按 assistant(tool_calls)+tool 落盘。
+type cursorHistTool struct {
+	ID, Name, Args string
+	Result         workbenchtools.ToolResult
+	RID            int64
 }
 
 // NewRunner 创建 Runner。
@@ -64,11 +81,36 @@ func NewRunner(st *store.Store, reg *workbenchtools.Registry, h *harness.Host, a
 	}
 }
 
+// Close 释放 Cursor Bridge 等资源。
+func (r *Runner) Close() {
+	r.closeCursorSession()
+}
+
 // Stop 停止指定线程正在进行的生成。
 func (r *Runner) Stop(threadID string) bool {
 	if threadID == "" {
 		return false
 	}
+	// 尽力取消 Cursor 侧 active run，避免下次 already has active run
+	go func() {
+		apiKey := r.store.AgentAPIKey()
+		agentID := r.loadCursorAgentID(threadID)
+		if apiKey == "" || agentID == "" {
+			return
+		}
+		dataDir, err := store.DataDir()
+		if err != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		sess := r.ensureCursorSession(dataDir, apiKey)
+		cli, err := sess.Ensure(ctx, nil)
+		if err != nil {
+			return
+		}
+		_, _ = cli.CancelActiveRuns(ctx, agentID, apiKey)
+	}()
 	r.runsMu.Lock()
 	cancel, ok := r.runs[threadID]
 	r.runsMu.Unlock()
@@ -149,6 +191,7 @@ func (r *Runner) prepareChat(req model.AgentChatRequestDO, resolveLeading bool) 
 	th.mu.Unlock()
 
 	ctxSnap := turnctx.AttachSSHEndpoints(req.Context, sshEndpointLookup(r.store))
+	ctxSnap = turnctx.AttachPluginPack(ctxSnap, pluginPackLookup(r))
 	ff := turnctx.Gather(ctxSnap, msg)
 	if len(skillIDs) > 0 {
 		ff = AppendSkillIDsFeedforward(ff, skillIDs)
@@ -242,7 +285,7 @@ func (r *Runner) Confirm(pendingID string, approved bool) error {
 				Content: formatToolMessage(denied, rid), ResourceIDsJSON: ids,
 			})
 			r.emit("agent:tool_end", map[string]interface{}{
-				"threadId": p.ThreadID, "tool": p.ToolName,
+				"threadId": p.ThreadID, "tool": p.ToolName, "callId": p.ID,
 				"status": StatusDenied, "summary": summary, "result": denied,
 			})
 			continue
@@ -260,7 +303,7 @@ func (r *Runner) Confirm(pendingID string, approved bool) error {
 			ResourceIDsJSON: history.EncodeResourceIDs([]int64{rid}),
 		})
 		end := map[string]interface{}{
-			"threadId": p.ThreadID, "tool": p.ToolName,
+			"threadId": p.ThreadID, "tool": p.ToolName, "callId": p.ID,
 			"status": st, "summary": summary, "result": result,
 		}
 		if rid > 0 {
@@ -280,6 +323,37 @@ type ChoiceAnswer struct {
 	PendingID string
 	Keys      []string
 	Text      string
+}
+
+// SetThreadMode 同步侧栏模式到后端线程（续跑/工具过滤以这里为准，不只看前端下拉框）。
+func (r *Runner) SetThreadMode(threadID, mode string) error {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return fmt.Errorf("threadId 不能为空")
+	}
+	th := r.ensureThread(threadID)
+	if th == nil {
+		return fmt.Errorf("对话线程不存在")
+	}
+	th.mu.Lock()
+	th.mode = NormalizeChatMode(mode)
+	th.mu.Unlock()
+	return nil
+}
+
+// choiceRequestsAgent 点选是否要求切到 Agent（写源码/构建）。
+func choiceRequestsAgent(answers []ChoiceAnswer) bool {
+	switchKeys := map[string]struct{}{
+		"go_agent": {}, "switch_agent": {}, "agent": {}, "granttools": {},
+	}
+	for _, a := range answers {
+		for _, k := range a.Keys {
+			if _, ok := switchKeys[strings.ToLower(strings.TrimSpace(k))]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Choose 写入 offer_choices 工具结果并续跑（同 task 一批选项需一次答完）。
@@ -304,6 +378,12 @@ func (r *Runner) Choose(answers []ChoiceAnswer) error {
 	th := r.ensureThread(seed.ThreadID)
 	if th == nil {
 		return fmt.Errorf("对话线程不存在")
+	}
+	// 侧栏已切 Agent / 点了 go_agent 时，续跑必须带上写工具，不能继续用 Plan 的只读集。
+	if choiceRequestsAgent(answers) {
+		th.mu.Lock()
+		th.mode = ChatModeAgent
+		th.mu.Unlock()
 	}
 	taskID := r.store.GetAgentPendingTaskID(seedID)
 	batch, err := r.store.ListAgentPendingSameTask(seed.ThreadID, taskID, seedID)
@@ -355,7 +435,7 @@ func (r *Runner) Choose(answers []ChoiceAnswer) error {
 			ResourceIDsJSON: history.EncodeResourceIDs([]int64{rid}),
 		})
 		end := map[string]interface{}{
-			"threadId": p.ThreadID, "tool": p.ToolName,
+			"threadId": p.ThreadID, "tool": p.ToolName, "callId": p.ID,
 			"status": st, "summary": summary, "result": result,
 		}
 		if rid > 0 {
@@ -450,12 +530,20 @@ func (r *Runner) executeConfirmed(toolName, argsJSON string) workbenchtools.Tool
 		return workbenchtools.StopContainerConfirmed(r.appCtx, r.tools.Deps(), argsJSON)
 	case "remove_container":
 		return workbenchtools.RemoveContainerConfirmed(r.appCtx, r.tools.Deps(), argsJSON)
+	case workbench.CapEditPluginPackFile:
+		return workbenchtools.EditPluginPackFileConfirmed(r.appCtx, r.tools.Deps(), argsJSON)
+	case workbench.CapWritePluginPackFile:
+		return workbenchtools.WritePluginPackFileConfirmed(r.appCtx, r.tools.Deps(), argsJSON)
+	case workbench.CapBuildPluginPackUI:
+		return workbenchtools.BuildPluginPackUIConfirmed(r.appCtx, r.tools.Deps(), argsJSON)
+	case workbench.CapRollbackPluginPack:
+		return workbenchtools.RollbackPluginPackConfirmed(r.appCtx, r.tools.Deps(), argsJSON)
 	default:
 		return r.harness.CallTool(r.appCtx, toolName, json.RawMessage(argsJSON))
 	}
 }
 
-// TestConnection 测试 LLM 连接（经 harness guest/model）。
+// TestConnection 测试 LLM / Cursor Bridge 连接。
 func (r *Runner) TestConnection() (string, error) {
 	if r.harness == nil {
 		return "", fmt.Errorf("harness 未就绪")
@@ -464,8 +552,11 @@ func (r *Runner) TestConnection() (string, error) {
 	if !settings.HasAPIKey {
 		return "", fmt.Errorf("请先保存 API Key")
 	}
-	ctx, cancel := context.WithTimeout(r.appCtx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.appCtx, 90*time.Second)
 	defer cancel()
+	if settings.Provider == store.AgentProviderCursor {
+		return r.TestCursorConnection(ctx)
+	}
 	cm, err := r.harness.NewChatModel(ctx, settings.Provider, r.store.AgentAPIKey(), settings.APIBase, settings.Model)
 	if err != nil {
 		return "", err
@@ -584,8 +675,14 @@ func toolStatusFromHistoryContent(toolName, content string) (status, summary str
 	if content == "" {
 		return StatusOK, toolName
 	}
+	// formatToolMessage 可能追加 「〔resource#N〕」，先剥掉再解析
+	if i := strings.Index(content, "\n〔resource#"); i >= 0 {
+		content = strings.TrimSpace(content[:i])
+	} else if i := strings.Index(content, "〔resource#"); i >= 0 {
+		content = strings.TrimSpace(content[:i])
+	}
 	var tr workbenchtools.ToolResult
-	if json.Unmarshal([]byte(content), &tr) == nil {
+	if json.Unmarshal([]byte(content), &tr) == nil && looksLikeToolResultJSON(content) {
 		if tr.NeedsConfirm {
 			return StatusNeedConfirm, firstNonEmpty(tr.ConfirmSummary, toolName+" 待确认")
 		}
@@ -600,14 +697,23 @@ func toolStatusFromHistoryContent(toolName, content string) (status, summary str
 		}
 		return StatusOK, firstNonEmpty(tr.ConfirmSummary, toolName)
 	}
-	low := strings.ToLower(content)
 	if strings.Contains(content, "用户已拒绝") {
 		return StatusDenied, "用户已拒绝"
 	}
-	if strings.Contains(low, "error") || strings.Contains(content, "失败") {
-		return StatusError, trimToolPreview(content, 120)
+	// 禁止用正文里是否出现 "error"/"失败" 猜状态（技能描述里很常见，会误标 list_skills 失败）
+	return StatusOK, trimToolPreview(summary, 120)
+}
+
+// looksLikeToolResultJSON 区分 ToolResult 与偶然能 Unmarshal 进空结构的 JSON（如 "{}"）。
+func looksLikeToolResultJSON(content string) bool {
+	content = strings.TrimSpace(content)
+	if !strings.HasPrefix(content, "{") {
+		return false
 	}
-	return StatusOK, trimToolPreview(content, 120)
+	return strings.Contains(content, `"ok"`) ||
+		strings.Contains(content, `"needsConfirm"`) ||
+		strings.Contains(content, `"needsChoice"`) ||
+		strings.Contains(content, `"error"`)
 }
 
 func firstNonEmpty(a, b string) string {
@@ -644,12 +750,8 @@ func (r *Runner) runTurn(threadID, prompt, feedforward string, skipUser bool, sk
 		return
 	}
 	settings := r.store.GetAgentSettings()
-	cm, err := r.harness.NewChatModel(r.appCtx, settings.Provider, r.store.AgentAPIKey(), settings.APIBase, settings.Model)
-	if err != nil {
-		r.emit("agent:done", map[string]interface{}{"threadId": threadID, "error": err.Error()})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.appCtx, 180*time.Second)
+	// DeepSeek 等也常多步工具；旧 180s 会被两条 60s SQL 顶穿并误报「已停止」。
+	ctx, cancel := context.WithTimeout(r.appCtx, 12*time.Minute)
 	r.runsMu.Lock()
 	if old, ok := r.runs[threadID]; ok {
 		old()
@@ -686,6 +788,23 @@ func (r *Runner) runTurn(threadID, prompt, feedforward string, skipUser bool, sk
 	mode := NormalizeChatMode(th.mode)
 	th.mu.Unlock()
 
+	if settings.Provider == store.AgentProviderCursor {
+		r.cursorMu.Lock()
+		r.cursorActiveThread = threadID
+		r.cursorMu.Unlock()
+		r.runCursorTurn(ctx, threadID, prompt, feedforward, skipUser, mode)
+		r.cursorMu.Lock()
+		r.cursorActiveThread = ""
+		r.cursorMu.Unlock()
+		return
+	}
+
+	cm, err := r.harness.NewChatModel(r.appCtx, settings.Provider, r.store.AgentAPIKey(), settings.APIBase, settings.Model)
+	if err != nil {
+		r.emit("agent:done", map[string]interface{}{"threadId": threadID, "error": err.Error()})
+		return
+	}
+
 	if !skipUser && len(pending) > 0 && r.harness.Root != "" {
 		refs, putErr := putUserImages(r.harness.Root, threadID, taskID, pending)
 		if putErr != nil {
@@ -718,15 +837,33 @@ func (r *Runner) runTurn(threadID, prompt, feedforward string, skipUser bool, sk
 		},
 	})
 	if err != nil {
-		if ctx.Err() != nil {
-			r.emit("agent:done", map[string]interface{}{"threadId": threadID, "stopped": true})
-			return
-		}
 		if g.waiting {
 			return
 		}
-		r.emit("agent:done", map[string]interface{}{"threadId": threadID, "error": err.Error()})
+		r.emitTurnDone(threadID, ctx, err)
 	}
+}
+
+// emitTurnDone 结束一轮：仅用户 Stop / 被新消息顶替 → stopped；整轮 deadline → 明确报超时（勿伪装成「已停止」）。
+func (r *Runner) emitTurnDone(threadID string, ctx context.Context, runErr error) {
+	if ctx != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			r.emit("agent:done", map[string]interface{}{"threadId": threadID, "stopped": true})
+			return
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			r.emit("agent:done", map[string]interface{}{
+				"threadId": threadID,
+				"error":    "本轮超时结束（非点停止，限 12 分钟）。单条 SQL 限 60s；请缩小查询后说「继续」",
+			})
+			return
+		}
+	}
+	if runErr != nil {
+		r.emit("agent:done", map[string]interface{}{"threadId": threadID, "error": runErr.Error()})
+		return
+	}
+	r.emit("agent:done", map[string]interface{}{"threadId": threadID})
 }
 
 /** trimSkillIDs 去空白 skill id。 */
@@ -857,17 +994,18 @@ func (r *Runner) systemPrompt(mode string) string {
 
 你是 WWorkbench 内置助手，当前是 Ask 模式。
 只讲解、答疑、给思路；禁止调用工具，禁止声称已经执行了操作。
-每轮可能带有「本轮工作台现状」前馈（界面焦点、中栏标签、@ 绑定、当前连接、当前笔记 noteId）——先读再答，不要空猜。终端输出不在前馈里，请用户切 Agent 后用 get_shell_output 查看。
-笔记正文不在前馈里；若要读全文请用户切到 Agent（get_note）。
-用户若要动手：请他切到 Plan（先出方案，自己也能做）或 Agent（执行，变更会确认）。`
+可能带有「工作台界面快照」前馈（焦点/@/连接/笔记）——只描述界面，不取代对话历史。终端/笔记全文不在前馈里，需切 Agent 用工具看。
+用户若要动手：请他切到 Plan 或 Agent。
+用户只回数字时按对话历史里上一轮编号选项理解；快照里没有列表不代表历史没有。`
 	}
 
 	toolRules := `
 
 你是 WWorkbench 内置助手，只能通过提供的工具操作工作台。
 规则：
-1. 每轮用户消息可能带有「本轮工作台现状」前馈（含界面焦点、中栏标签、@ 绑定、当前连接、当前笔记 noteId）。用户说「这个 / 这张表 / 这个库 / 这个主机 / 这个请求 / 这篇笔记」且没给出新地址时，优先指界面焦点，不要空猜；优先使用其中的 ID，不要编造。用户消息里出现 ssh -p / user@host 时，那是权威地址，优先于 @ 绑定：地址不同就是新机器，save_ssh_host 必须用命令里的 host/port，禁止沿用绑定资产的 host，shell_probe 不要用旧 hostId。问终端输出、报错、是否装好用 get_shell_output 按需分页拉取（offsetFromEnd=0 为最新），不要编造，不要为了看屏幕乱 shell_probe。
-1b. 前馈「本轮 @ 绑定」已有 SSH / Docker / 数据库时：优先把该绑定当作本轮默认操作对象并在回复里点名（例如「按已绑定的 Whist…」）。用户未改口时不要无「有哪些机器」式空问代替默认；但目标仍不确定、或用户话与绑定冲突时，可以问清再动手。
+1. 用户消息可附带「工作台界面快照」前馈（焦点、中栏、@ 绑定、连接、笔记 noteId）——只描述界面，**不是**新开对话、不取代 messages 历史。用户说「这个 / 这张表 / 这个库 / 这个主机 / 这个请求 / 这篇笔记」且没给新地址时，优先指界面焦点；ssh -p / user@host 优先于 @ 绑定。问终端输出用 get_shell_output，勿编造。
+1b. 前馈「@ 绑定」已有 SSH / Docker / 数据库时：优先当作默认操作对象并在回复里点名。用户未改口时不要用「有哪些机器」式空问；目标不确定或与绑定冲突时再问清。
+1c. 用户只回「1」「2」时：在**对话历史**里找上一轮助手的编号选项并对号执行；禁止因界面快照里没有列表就说「本轮没有选项」。
 2. 用户问「有哪些连接/链接」时，必须同时调用 list_connections（数据库）与 list_ssh_hosts（SSH），分开展示。
 3. Shell 合同：人看得见的工作（pip、下载、训练、写脚本、管道）必须 shell_run 注入可见 PTY，本轮不返回 stdout，禁止编造输出；注入后用 get_shell_output 看新输出。shell_probe 只做只读短探针（uptime / free / df / nvidia-smi / pip show / python -c print / ls / cat），另开会话、等结果、默认 30s；装包/下载/训练/跑脚本会被拒绝。看磁盘文件用 cat，不要 sed/awk。用户 PTY 正忙时不要用探针抢同一台的交互。问「跑完了吗」用 get_shell_output，不要为了看屏幕再跑一遍。会话断开或面板出现「会话已结束」时先 terminal_reconnect（sessionId 或 hostId），再继续 shell_run。
 3b. 长任务（大文件下载、pip、训练）：shell_run 注入后最多用 get_shell_output 查 1～2 次进度；若仍在进行，向用户汇报当前进度并结束本轮，请用户到终端看进度、完成后说「继续」或「查进度」。禁止在同一轮里反复「继续等待」空转轮询，否则会打满工具步数。
@@ -881,7 +1019,12 @@ func (r *Runner) systemPrompt(mode string) string {
 9b. 工作台是资产容器——凡要可复现的配置必须落盘：HTTP→save_http_request + save_http_environment；SSH→save_ssh_host / save_ssh_forward；数据库→save_connection；日志→save_log_source；Docker→save_docker_context。禁止只临时候参数打完就结束；笔记本是报告旁路，主资产在各产品树。
 10. 本轮工具返回已在上下文中，直接基于其内容作答；不要为本轮结果调用 recall_resource。跨轮或历史被挤出窗口后，用 recall_resource（resource#N / resource_id）取回全文；可用 search_session / get_task_summary 定位。
 11. 技能：用户 / 挂载或消息带 skillIds 时，首轮必须先 get_skill 加载 SKILL.md 与经验；scripts 用 read_file 读 system/skills/<id>/scripts/…，不要臆造流程。改 Skill 正文用 update_agent_skill（不写笔记）或「技能」产品线；首次从笔记发布用 publish_agent_skill（只写关联标记）；抽象报告为方法包用 /skill-to-method-pack。
-11b. 需要用户拍板（选库/选操作/可选下一步）时：必须调用工具 offer_choices（prompt + options[{key,label}]，mode=single|multi|text），调用后本轮暂停，用户点选后结果写入该工具返回值并续跑。禁止只用 Markdown 列表代替（对方只能手打）。仅当无法调用工具时，才可在回复末尾挂 agent-choice / desk-choice 围栏作为兜底（JSON 须完整合法）。禁止向用户描述工具管道内部细节或自言自语。禁止在回复中复述用户密码。`
+11b. 需要用户拍板（选库/选操作/可选下一步）时：必须调用 offer_choices（prompt + options[{key,label}]，mode=single|multi|text），调用后暂停，点选结果写入工具返回值再续跑。**禁止**只用 Markdown 列表代替（对方只能手打「1」易歧义）。无法调工具时才可挂 agent-choice / desk-choice 围栏兜底。禁止描述工具管道内部细节；禁止复述用户密码。
+12. 插件包 ≠ 数据库连接。用户说「db 插件 / 数据库插件 / pack / Host 桥接 / WWHost / 插件显示 xxx」= 看与改 ~/.wworkbench/plugins/<id>，不是技能、不是 SQL。
+   - **协议 SSOT**：先 get_plugin_protocol（平台 PROTOCOL.md + ww-cap）；禁止 list_skills/get_skill 找 bridge。各 pack 的 HOST.md 只是补充。
+   - 改 UI：get_plugin_pack（看 capOk）→ read_plugin_pack_file（分段 startLine/maxLines）→ **优先** edit_plugin_pack_file → build_plugin_pack_ui（均需确认）。只改源码不构建，界面不变。
+   - 回滚：list_plugin_pack_releases → rollback_plugin_pack。WWHost 分层见协议；禁止复制 React/Host；禁止用 execute_sql「改插件界面」。
+13. Pack UI 构建契约：见 get_plugin_protocol；vite external react/react-dom/@wworkbench/host → globals React/ReactDOM/WWHost。`
 
 	if mode == ChatModePlan {
 		return langRule + `
@@ -889,14 +1032,26 @@ func (r *Runner) systemPrompt(mode string) string {
 你是 WWorkbench 内置助手，当前是 Plan 模式。
 产品目标是让用户自己能做，而不是你代劳。
 用只读/探查工具摸清现状，然后给出计划：目标、现状判断、分步（每步人能做或交给 Agent）、风险与需确认的点。
-禁止变更：save_*、启停/删容器、写入 SQL、变更类 HTTP、往笔记本落盘。
-末尾可用 offer_choices（或 agent-choice 兜底）问用户「切到 Agent 执行」还是「我自己按步骤做」。
+用户要改「插件 / pack UI / 数据库插件显示」时：先 list_plugin_packs / read_plugin_pack_file，计划写清改哪个 relPath；不要当成连库或 SQL。
+本模式没有 edit_plugin_pack_file / write_plugin_pack_file / build_plugin_pack_ui / rollback_plugin_pack（已故意卸掉，不是权限页能「挂载」的）。因此：
+- 禁止把「请用户自己 cd + npm install + npm run build」当作首选方案；
+- 禁止编造 granttools /「已挂载写工具」类选项——写工具只在 **Agent** 模式出现；
+- 首选：用 offer_choices，选项 key 必须是 go_agent（切到 Agent 由我执行）与 self（用户自己改）；
+- 仅当用户选 self 时，才给手动路径。
+禁止变更：save_*、启停/删容器、写入 SQL、变更类 HTTP、往笔记本落盘、edit_plugin_pack_file、write_plugin_pack_file、build_plugin_pack_ui、rollback_plugin_pack。
+末尾必须用 offer_choices，且包含 go_agent 与 self。
 ` + toolRules + `
 
 【Plan 覆盖】本轮禁止执行变更与资产落盘；只读探查后写计划。`
 	}
 
-	return langRule + toolRules
+	return langRule + `
+
+【当前是 Agent 模式】工具列表已含 edit_plugin_pack_file、write_plugin_pack_file、build_plugin_pack_ui。
+改 pack UI 必须直接调用它们（侧栏确认）；大文件局部改用 edit_plugin_pack_file，禁止声称「只能整文件写 / 无法 patch / 请用户自己 npm」。
+若更早轮次在 Plan 里说过没写工具，以本轮工具列表为准，忽略那段自述。
+若设置里服务商为 Cursor：本轮经 Cursor SDK Bridge 驱动（非 OpenAI Base URL），工作台工具以自定义工具回调执行。
+` + toolRules
 }
 
 func sshEndpointLookup(st *store.Store) func(id string) (user, host string, port int, ok bool) {
@@ -909,5 +1064,22 @@ func sshEndpointLookup(st *store.Store) func(id string) (user, host string, port
 			return "", "", 0, false
 		}
 		return h.User, h.Host, h.Port, true
+	}
+}
+
+func pluginPackLookup(r *Runner) turnctx.PluginPackLookup {
+	return func(packID string) (sourcePath, runPath string, uiBuilt bool, ok bool) {
+		if r == nil || r.tools == nil {
+			return "", "", false, false
+		}
+		deps := r.tools.Deps()
+		if deps == nil || deps.PluginPacks == nil {
+			return "", "", false, false
+		}
+		info, err := deps.PluginPacks.Get(packID)
+		if err != nil {
+			return "", "", false, false
+		}
+		return info.SourcePath, info.RunPath, info.UIBuilt, true
 	}
 }

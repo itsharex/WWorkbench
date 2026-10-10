@@ -5,7 +5,6 @@ export interface CapabilityRow {
   risk: string
   description: string
   enabled: boolean
-  needsConfirm: boolean
 }
 
 export type AgentPanelView = 'chat' | 'config' | 'permissions'

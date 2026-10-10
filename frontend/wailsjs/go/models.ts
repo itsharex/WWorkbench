@@ -1,5 +1,55 @@
 export namespace app {
 	
+	export class PluginProtocolDO {
+	    hostCapVersion: string;
+	    path: string;
+	    content: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PluginProtocolDO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hostCapVersion = source["hostCapVersion"];
+	        this.path = source["path"];
+	        this.content = source["content"];
+	    }
+	}
+	export class ApiResult_WWorkbench_internal_app_PluginProtocolDO_ {
+	    ok: boolean;
+	    data: PluginProtocolDO;
+	    error?: errno.AppError;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApiResult_WWorkbench_internal_app_PluginProtocolDO_(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], PluginProtocolDO);
+	        this.error = this.convertValues(source["error"], errno.AppError);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ApiResult_WWorkbench_internal_model_AgentChatResultDO_ {
 	    ok: boolean;
 	    data: model.AgentChatResultDO;
@@ -1496,6 +1546,108 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class ApiResult_WWorkbench_internal_pluginpack_BuildResult_ {
+	    ok: boolean;
+	    data: pluginpack.BuildResult;
+	    error?: errno.AppError;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApiResult_WWorkbench_internal_pluginpack_BuildResult_(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], pluginpack.BuildResult);
+	        this.error = this.convertValues(source["error"], errno.AppError);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ApiResult_WWorkbench_internal_pluginpack_PackInfo_ {
+	    ok: boolean;
+	    data: pluginpack.PackInfo;
+	    error?: errno.AppError;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApiResult_WWorkbench_internal_pluginpack_PackInfo_(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], pluginpack.PackInfo);
+	        this.error = this.convertValues(source["error"], errno.AppError);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ApiResult_WWorkbench_internal_pluginpack_ReleaseInfo_ {
+	    ok: boolean;
+	    data: pluginpack.ReleaseInfo;
+	    error?: errno.AppError;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApiResult_WWorkbench_internal_pluginpack_ReleaseInfo_(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], pluginpack.ReleaseInfo);
+	        this.error = this.convertValues(source["error"], errno.AppError);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ApiResult___WWorkbench_internal_model_AgentCapabilityDO_ {
 	    ok: boolean;
 	    data: model.AgentCapabilityDO[];
@@ -2516,6 +2668,74 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class ApiResult___WWorkbench_internal_pluginpack_PackInfo_ {
+	    ok: boolean;
+	    data: pluginpack.PackInfo[];
+	    error?: errno.AppError;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApiResult___WWorkbench_internal_pluginpack_PackInfo_(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], pluginpack.PackInfo);
+	        this.error = this.convertValues(source["error"], errno.AppError);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ApiResult___WWorkbench_internal_pluginpack_ReleaseInfo_ {
+	    ok: boolean;
+	    data: pluginpack.ReleaseInfo[];
+	    error?: errno.AppError;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApiResult___WWorkbench_internal_pluginpack_ReleaseInfo_(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], pluginpack.ReleaseInfo);
+	        this.error = this.convertValues(source["error"], errno.AppError);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ApiResult___string_ {
 	    ok: boolean;
 	    data: string[];
@@ -2864,6 +3084,10 @@ export namespace model {
 	    noteId?: string;
 	    mentions: AgentMentionDO[];
 	    skillIds?: string[];
+	    pluginPackId?: string;
+	    pluginSourcePath?: string;
+	    pluginRunPath?: string;
+	    pluginUIBuilt?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentContextDO(source);
@@ -2886,6 +3110,10 @@ export namespace model {
 	        this.noteId = source["noteId"];
 	        this.mentions = this.convertValues(source["mentions"], AgentMentionDO);
 	        this.skillIds = source["skillIds"];
+	        this.pluginPackId = source["pluginPackId"];
+	        this.pluginSourcePath = source["pluginSourcePath"];
+	        this.pluginRunPath = source["pluginRunPath"];
+	        this.pluginUIBuilt = source["pluginUIBuilt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -5109,6 +5337,117 @@ export namespace model {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
+	    }
+	}
+
+}
+
+export namespace pluginpack {
+	
+	export class BuildResult {
+	    packId: string;
+	    uiDir: string;
+	    entry: string;
+	    uiFiles?: string[];
+	    buildFingerprint: string;
+	    builtAt: string;
+	    releaseId?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BuildResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.packId = source["packId"];
+	        this.uiDir = source["uiDir"];
+	        this.entry = source["entry"];
+	        this.uiFiles = source["uiFiles"];
+	        this.buildFingerprint = source["buildFingerprint"];
+	        this.builtAt = source["builtAt"];
+	        this.releaseId = source["releaseId"];
+	    }
+	}
+	export class PackInfo {
+	    id: string;
+	    name: string;
+	    version: string;
+	    enabled: boolean;
+	    sourcePath: string;
+	    runPath: string;
+	    uiPath: string;
+	    uiBuilt: boolean;
+	    uiEntry?: string;
+	    uiFiles?: string[];
+	    buildFingerprint?: string;
+	    builtAt?: string;
+	    activeReleaseId?: string;
+	    releaseCount?: number;
+	    capabilities: string[];
+	    products: string[];
+	    requiresWwCap?: string;
+	    hostCapVersion?: string;
+	    capOk: boolean;
+	    capDetail?: string;
+	    manifestIssues?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PackInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.version = source["version"];
+	        this.enabled = source["enabled"];
+	        this.sourcePath = source["sourcePath"];
+	        this.runPath = source["runPath"];
+	        this.uiPath = source["uiPath"];
+	        this.uiBuilt = source["uiBuilt"];
+	        this.uiEntry = source["uiEntry"];
+	        this.uiFiles = source["uiFiles"];
+	        this.buildFingerprint = source["buildFingerprint"];
+	        this.builtAt = source["builtAt"];
+	        this.activeReleaseId = source["activeReleaseId"];
+	        this.releaseCount = source["releaseCount"];
+	        this.capabilities = source["capabilities"];
+	        this.products = source["products"];
+	        this.requiresWwCap = source["requiresWwCap"];
+	        this.hostCapVersion = source["hostCapVersion"];
+	        this.capOk = source["capOk"];
+	        this.capDetail = source["capDetail"];
+	        this.manifestIssues = source["manifestIssues"];
+	    }
+	}
+	export class ReleaseInfo {
+	    id: string;
+	    packId: string;
+	    version: string;
+	    createdAt: string;
+	    reason: string;
+	    note?: string;
+	    buildFingerprint?: string;
+	    hasUI: boolean;
+	    active: boolean;
+	    path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ReleaseInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.packId = source["packId"];
+	        this.version = source["version"];
+	        this.createdAt = source["createdAt"];
+	        this.reason = source["reason"];
+	        this.note = source["note"];
+	        this.buildFingerprint = source["buildFingerprint"];
+	        this.hasUI = source["hasUI"];
+	        this.active = source["active"];
+	        this.path = source["path"];
 	    }
 	}
 

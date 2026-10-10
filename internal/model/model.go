@@ -770,12 +770,13 @@ type NotebookLayoutDO struct {
 
 // AgentCapabilityDO 单项 AI 能力（含开关状态）。
 type AgentCapabilityDO struct {
-	Name         string `json:"name"`
-	Label        string `json:"label"`
-	Risk         string `json:"risk"`
-	Description  string `json:"description"`
-	Enabled      bool   `json:"enabled"`
-	NeedsConfirm bool   `json:"needsConfirm"`
+	Name        string `json:"name"`
+	Label       string `json:"label"`
+	Risk        string `json:"risk"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	// NeedsConfirm 已废弃（始终 false）；写风险看 Risk=="write"。保留字段以免旧前端崩。
+	NeedsConfirm bool `json:"needsConfirm"`
 }
 
 // AgentSettingsDO Agent 配置（对外展示）。
@@ -856,6 +857,11 @@ type AgentContextDO struct {
 	NoteID            string           `json:"noteId,omitempty"` // 当前打开的笔记
 	Mentions          []AgentMentionDO `json:"mentions"`
 	SkillIDs          []string         `json:"skillIds,omitempty"` // 本对话绑定的 / 技能
+	// 插件包工作目录（产品线绑定的 pack；改 UI 走 pack 工具，勿 shell 翻 Host 仓库）
+	PluginPackID     string `json:"pluginPackId,omitempty"`
+	PluginSourcePath string `json:"pluginSourcePath,omitempty"`
+	PluginRunPath    string `json:"pluginRunPath,omitempty"`
+	PluginUIBuilt    bool   `json:"pluginUIBuilt,omitempty"`
 }
 
 // AgentChatImageDO 对话附件图片（data 为无前缀 base64，或 data URL）。

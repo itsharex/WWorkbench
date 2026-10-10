@@ -17,7 +17,6 @@ interface Props {
   choiceDisabled?: boolean
   /** 有工具级 pending 选项时，隐藏 Markdown 兜底面板，避免双份 */
   hideInlineChoice?: boolean
-  onChoiceDraft?: (text: string) => void
   onChoiceSubmit?: (answers: ChoiceSubmitAnswer[]) => void
 }
 
@@ -31,7 +30,6 @@ export function AgentMessageContent({
   images,
   choiceDisabled,
   hideInlineChoice,
-  onChoiceDraft,
   onChoiceSubmit,
 }: Props) {
   const choice = useMemo(
@@ -49,18 +47,14 @@ export function AgentMessageContent({
           className="agent-turn-skills"
         />
         <AgentRichContent content={choice?.body || content} />
-        {!hideInlineChoice &&
-          choice &&
-          choice.questions.length > 0 &&
-          (onChoiceDraft || onChoiceSubmit) && (
-            <AgentChoicePanel
-              questions={choice.questions}
-              disabled={choiceDisabled}
-              inline
-              onDraft={onChoiceDraft}
-              onSubmit={onChoiceSubmit}
-            />
-          )}
+        {!hideInlineChoice && choice && choice.questions.length > 0 && onChoiceSubmit ? (
+          <AgentChoicePanel
+            questions={choice.questions}
+            disabled={choiceDisabled}
+            inline
+            onSubmit={onChoiceSubmit}
+          />
+        ) : null}
       </>
     )
   }

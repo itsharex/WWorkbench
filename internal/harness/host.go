@@ -104,12 +104,25 @@ func (h *Host) NewChatModel(ctx context.Context, provider, apiKey, baseURL, mode
 		return nil, fmt.Errorf("harness: not open")
 	}
 	cm, _, err := guestmodel.NewChatModel(ctx, guestmodel.Config{
-		Provider: guestmodel.ParseProvider(provider),
+		Provider: guestmodel.ParseProvider(mapProviderForGuest(provider)),
 		APIKey:   apiKey,
 		BaseURL:  baseURL,
 		Model:    modelName,
 	})
 	return cm, err
+}
+
+// mapProviderForGuest 将产品侧服务商 id 映射为 ningharness Provider。
+func mapProviderForGuest(provider string) string {
+	switch strings.TrimSpace(strings.ToLower(provider)) {
+	case "bailian":
+		return "qwen"
+	case "cursor":
+		// Cursor 真驱动走 SDK Bridge，不经本工厂；保留映射以免误调。
+		return "openai"
+	default:
+		return provider
+	}
 }
 
 // Complete 一轮进模：Stream 由 Host.Stream 或 ctx DeltaHandler 决定。

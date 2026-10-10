@@ -42,6 +42,8 @@ export function suggestedModels(provider: string): string[] {
       return ['MiniMax-M2.5', 'MiniMax-M3']
     case 'bailian':
       return ['qwen-plus', 'qwen-turbo', 'qwen-max', 'qwen-vl-plus']
+    case 'cursor':
+      return ['composer-2.5', 'composer-2']
     default:
       return []
   }

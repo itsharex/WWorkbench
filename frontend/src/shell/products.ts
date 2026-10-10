@@ -10,6 +10,7 @@ export type ProductId =
   | 'skills'
   | 'httpapi'
   | 'logs'
+  | 'plugins'
 
 export interface ProductDef {
   id: ProductId
@@ -26,6 +27,7 @@ export const PRODUCTS: ProductDef[] = [
   { id: 'skills', available: true },
   { id: 'httpapi', available: true },
   { id: 'logs', available: true },
+  { id: 'plugins', available: true },
 ]
 
 /** getProduct 按 id 查找产品线元数据。 */

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   formatChoiceSendText,
-  joinChoiceSendTexts,
   type AgentChoiceQuestion,
   type ChoiceAnswer,
 } from './agentChoice'
 import { useI18n } from '../../i18n'
+import { pressProps } from '../../components/compat'
 
 export type ChoiceSubmitAnswer = {
   pendingId?: string
@@ -19,17 +19,12 @@ interface Props {
   disabled?: boolean
   /** 嵌入助手气泡：无独立边框，随消息区滚动 */
   inline?: boolean
-  /** 将选项写入侧栏输入框（Markdown 兜底路径） */
-  onDraft?: (text: string) => void
-  /**
-   * 工具 offer_choices 路径：点选后直接提交续跑。
-   * 有 onSubmit 时优先走提交，不再只填输入框。
-   */
-  onSubmit?: (answers: ChoiceSubmitAnswer[]) => void
+  /** 点选后提交：offer_choices 续跑，或围栏 choice 转成用户消息 */
+  onSubmit: (answers: ChoiceSubmitAnswer[]) => void
 }
 
-/** AgentChoicePanel 渲染助手挂出的可点选项（对齐 AgentDesk desk-choice）。 */
-export function AgentChoicePanel({ questions, disabled, inline, onDraft, onSubmit }: Props) {
+/** AgentChoicePanel 渲染助手挂出的可点选项。 */
+export function AgentChoicePanel({ questions, disabled, inline, onSubmit }: Props) {
   const { t } = useI18n()
   const [answers, setAnswers] = useState<Record<number, ChoiceAnswer>>({})
 
@@ -40,7 +35,6 @@ export function AgentChoicePanel({ questions, disabled, inline, onDraft, onSubmi
       next[q.n] = { keys: [], text: '' }
     }
     setAnswers(next)
-    // 仅题目集合变化时重置；questions 随 qKey 同步
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qKey])
 
@@ -57,48 +51,30 @@ export function AgentChoicePanel({ questions, disabled, inline, onDraft, onSubmi
 
   const canSendAll = sendTexts.length === questions.length && sendTexts.every(Boolean) && !disabled
   const needBatch = questions.some((q) => q.mode === 'multi') || questions.length > 1
-  const toolMode = typeof onSubmit === 'function'
 
   const toSubmitPayload = (next: Record<number, ChoiceAnswer>): ChoiceSubmitAnswer[] =>
     questions.map((q) => {
       const a = next[q.n] ?? { keys: [], text: '' }
+      const text = (a.text ?? '').trim() || formatChoiceSendText(q, a)
       return {
         pendingId: q.id,
         keys: a.keys ?? [],
-        text: (a.text ?? '').trim(),
+        text,
       }
     })
 
-  const pushDraft = (next: Record<number, ChoiceAnswer>) => {
-    if (!onDraft) return
-    const body = joinChoiceSendTexts(questions, next)
-    if (body) onDraft(body)
-  }
-
   const submitNow = (next: Record<number, ChoiceAnswer>) => {
-    if (!onSubmit || disabled) return
+    if (disabled) return
     onSubmit(toSubmitPayload(next))
   }
 
   const pickSingle = (q: AgentChoiceQuestion, key: string) => {
     if (disabled) return
     if (needBatch) {
-      setAnswers((prev) => {
-        const next = { ...prev, [q.n]: { keys: [key], text: '' } }
-        if (!toolMode) pushDraft(next)
-        return next
-      })
+      setAnswers((prev) => ({ ...prev, [q.n]: { keys: [key], text: '' } }))
       return
     }
-    const next = { ...answers, [q.n]: { keys: [key], text: '' } }
-    setAnswers(next)
-    if (toolMode) {
-      submitNow(next)
-      return
-    }
-    const opt = q.options.find((o) => o.key === key)
-    const label = (opt?.label || '').trim()
-    if (label && onDraft) onDraft(label)
+    submitNow({ ...answers, [q.n]: { keys: [key], text: '' } })
   }
 
   const toggleMulti = (q: AgentChoiceQuestion, key: string) => {
@@ -109,9 +85,7 @@ export function AgentChoicePanel({ questions, disabled, inline, onDraft, onSubmi
       const i = keys.indexOf(key)
       if (i >= 0) keys.splice(i, 1)
       else keys.push(key)
-      const next = { ...prev, [q.n]: { ...cur, keys } }
-      if (!toolMode) pushDraft(next)
-      return next
+      return { ...prev, [q.n]: { ...cur, keys } }
     })
   }
 
@@ -120,30 +94,13 @@ export function AgentChoicePanel({ questions, disabled, inline, onDraft, onSubmi
     const text = formatChoiceSendText(q, answers[q.n] ?? {})
     if (!text) return
     if (needBatch) {
-      setAnswers((prev) => {
-        const next = { ...prev, [q.n]: { ...(prev[q.n] ?? { keys: [] }), text } }
-        if (!toolMode) pushDraft(next)
-        return next
-      })
+      setAnswers((prev) => ({
+        ...prev,
+        [q.n]: { ...(prev[q.n] ?? { keys: [] }), text },
+      }))
       return
     }
-    const next = { ...answers, [q.n]: { keys: [], text } }
-    setAnswers(next)
-    if (toolMode) {
-      submitNow(next)
-      return
-    }
-    onDraft?.(text)
-  }
-
-  const sendAll = () => {
-    if (!canSendAll) return
-    if (toolMode) {
-      submitNow(answers)
-      return
-    }
-    const body = joinChoiceSendTexts(questions, answers)
-    if (body) onDraft?.(body)
+    submitNow({ ...answers, [q.n]: { keys: [], text } })
   }
 
   const isSelected = (q: AgentChoiceQuestion, key: string) => {
@@ -186,9 +143,11 @@ export function AgentChoicePanel({ questions, disabled, inline, onDraft, onSubmi
                 type="button"
                 className="wn-btn wn-btn-xs"
                 disabled={disabled || !(answers[q.n]?.text || '').trim()}
-                onClick={() => submitText(q)}
+                {...pressProps(() => submitText(q), {
+                  disabled: disabled || !(answers[q.n]?.text || '').trim(),
+                })}
               >
-                {toolMode ? t('agent.choiceConfirm') : t('agent.choiceSend')}
+                {t('agent.choiceConfirm')}
               </button>
             </div>
           ) : (
@@ -202,9 +161,10 @@ export function AgentChoicePanel({ questions, disabled, inline, onDraft, onSubmi
                   }`}
                   disabled={disabled}
                   title={opt.label}
-                  onClick={() =>
-                    q.mode === 'multi' ? toggleMulti(q, opt.key) : pickSingle(q, opt.key)
-                  }
+                  {...pressProps(
+                    () => (q.mode === 'multi' ? toggleMulti(q, opt.key) : pickSingle(q, opt.key)),
+                    { disabled },
+                  )}
                 >
                   <span className="agent-choice-key">{opt.key}</span>
                   <span className="agent-choice-label">{opt.label}</span>
@@ -220,9 +180,9 @@ export function AgentChoicePanel({ questions, disabled, inline, onDraft, onSubmi
             type="button"
             className="wn-btn wn-btn-xs wn-btn-primary"
             disabled={!canSendAll}
-            onClick={sendAll}
+            {...pressProps(() => submitNow(answers), { disabled: !canSendAll })}
           >
-            {toolMode ? t('agent.choiceConfirm') : t('agent.choiceApplyInput')}
+            {t('agent.choiceConfirm')}
             {sendTexts.length ? `（${sendTexts.length}/${questions.length}）` : ''}
           </button>
         </div>

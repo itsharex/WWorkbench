@@ -49,7 +49,7 @@ func (g *workbenchGuest) Run(ctx context.Context, in guest.Input) (string, error
 	root := g.r.harness.Root
 	_ = history.EnsureSystem(root, g.threadID, g.r.systemPrompt(g.mode))
 
-	perms := g.r.store.GetToolPermissions()
+	perms := g.r.tools.Deps().EffectivePermissions()
 	toolDefs := g.r.listToolDefs(perms, g.mode)
 	toolInfos, err := toSchemaTools(toolDefs)
 	if err != nil {
@@ -60,7 +60,7 @@ func (g *workbenchGuest) Run(ctx context.Context, in guest.Input) (string, error
 	progressPolls := 0
 	for step := 0; step < maxAgentSteps; step++ {
 		if ctx.Err() != nil {
-			g.r.emit("agent:done", map[string]interface{}{"threadId": g.threadID, "stopped": true})
+			g.r.emitTurnDone(g.threadID, ctx, ctx.Err())
 			return "", ctx.Err()
 		}
 		all, err := history.Load(root, g.threadID)
@@ -144,7 +144,6 @@ func (g *workbenchGuest) Run(ctx context.Context, in guest.Input) (string, error
 			ToolCallsJSON: history.EncodeToolCalls(specs), TaskID: g.taskID,
 		})
 
-		var awaiting []confirmAwaitItem
 		var awaitingChoice []confirmAwaitItem
 
 		for _, pc := range planned {
@@ -161,7 +160,7 @@ func (g *workbenchGuest) Run(ctx context.Context, in guest.Input) (string, error
 			}
 			_, _, _ = g.r.harness.PutToolCall(g.threadID, g.taskID, callID, name, string(args))
 			g.r.emit("agent:tool_start", map[string]interface{}{
-				"threadId": g.threadID, "tool": name, "args": string(args), "taskId": g.taskID,
+				"threadId": g.threadID, "tool": name, "args": string(args), "taskId": g.taskID, "callId": callID,
 			})
 
 			if perms != nil && !harness.IsMemoryTool(name) && !workbenchtools.IsToolEnabled(perms, name) {
@@ -178,17 +177,9 @@ func (g *workbenchGuest) Run(ctx context.Context, in guest.Input) (string, error
 			}
 
 			result := g.r.harness.CallTool(ctx, name, args)
+			// 写工具不再走侧栏确认：NeedsConfirm 时直接执行 Confirmed 路径。
 			if result.NeedsConfirm {
-				_ = g.r.store.SaveAgentPendingFull(callID, g.threadID, g.taskID, name, string(args), result.ConfirmSummary)
-				awaiting = append(awaiting, confirmAwaitItem{
-					callID: callID, name: name, summary: result.ConfirmSummary,
-					preview: json.RawMessage(result.Data),
-				})
-				g.r.emit("agent:tool_end", map[string]interface{}{
-					"threadId": g.threadID, "tool": name,
-					"status": StatusNeedConfirm, "summary": result.ConfirmSummary,
-				})
-				continue
+				result = g.r.executeConfirmed(name, string(args))
 			}
 			if result.NeedsChoice {
 				payload := result.Data
@@ -201,7 +192,7 @@ func (g *workbenchGuest) Run(ctx context.Context, in guest.Input) (string, error
 					preview: json.RawMessage(payload),
 				})
 				g.r.emit("agent:tool_end", map[string]interface{}{
-					"threadId": g.threadID, "tool": name,
+					"threadId": g.threadID, "tool": name, "callId": callID,
 					"status": StatusNeedChoice, "summary": result.ConfirmSummary,
 				})
 				continue
@@ -236,7 +227,7 @@ func (g *workbenchGuest) Run(ctx context.Context, in guest.Input) (string, error
 				appendToolErrorNote(ctx, note)
 			}
 			payload := map[string]interface{}{
-				"threadId": g.threadID, "tool": name,
+				"threadId": g.threadID, "tool": name, "callId": callID,
 				"status": st, "summary": summary, "result": result,
 			}
 			if rid > 0 {
@@ -261,30 +252,6 @@ func (g *workbenchGuest) Run(ctx context.Context, in guest.Input) (string, error
 			}
 		}
 
-		if len(awaiting) > 0 {
-			g.waiting = true
-			items := make([]map[string]interface{}, 0, len(awaiting))
-			for _, a := range awaiting {
-				items = append(items, map[string]interface{}{
-					"pendingId": a.callID, "tool": a.name,
-					"summary": a.summary, "preview": a.preview,
-				})
-			}
-			first := awaiting[0]
-			g.r.emit("agent:needs_confirm", map[string]interface{}{
-				"threadId":  g.threadID,
-				"pendingId": first.callID,
-				"tool":      first.name,
-				"summary":   batchConfirmSummary(awaiting),
-				"preview":   first.preview,
-				"items":     items,
-			})
-			g.r.emit("agent:done", map[string]interface{}{"threadId": g.threadID, "waitingConfirm": true})
-			if st := lifecycle.RunStateFrom(ctx); st != nil {
-				st.Set("waiting_confirm", true)
-			}
-			return "", nil
-		}
 		if len(awaitingChoice) > 0 {
 			g.waiting = true
 			if strings.TrimSpace(asstContent) != "" {
@@ -312,41 +279,6 @@ func (g *workbenchGuest) Run(ctx context.Context, in guest.Input) (string, error
 type confirmAwaitItem struct {
 	callID, name, summary string
 	preview               json.RawMessage
-}
-
-func batchConfirmSummary(items []confirmAwaitItem) string {
-	if len(items) == 0 {
-		return "有操作待确认"
-	}
-	if len(items) == 1 {
-		if s := strings.TrimSpace(items[0].summary); s != "" {
-			return s
-		}
-		return items[0].name + " 待确认"
-	}
-	byTool := map[string]int{}
-	for _, it := range items {
-		byTool[it.name]++
-	}
-	if len(byTool) == 1 {
-		for name, n := range byTool {
-			switch name {
-			case "remove_container":
-				return fmt.Sprintf("拟删除 %d 个容器（需确认）", n)
-			case "stop_container":
-				return fmt.Sprintf("拟停止 %d 个容器（需确认）", n)
-			case "start_container":
-				return fmt.Sprintf("拟启动 %d 个容器（需确认）", n)
-			case "execute_sql":
-				return fmt.Sprintf("拟执行 %d 条 SQL（需确认）", n)
-			case "execute_http":
-				return fmt.Sprintf("拟执行 %d 个 HTTP 请求（需确认）", n)
-			default:
-				return fmt.Sprintf("拟执行 %d 次 %s（需确认）", n, name)
-			}
-		}
-	}
-	return fmt.Sprintf("拟执行 %d 项需确认操作", len(items))
 }
 
 func (g *workbenchGuest) appendToolResult(root, callID string, result workbenchtools.ToolResult, rid int64) error {
@@ -442,6 +374,26 @@ func toSchemaTools(defs []workbenchtools.ToolDef) ([]*schema.ToolInfo, error) {
 	return out, nil
 }
 
+// wireUserPromptFirst 进模 user：原话 → 快照。与 ningharness.WireUser（快照在前）相反，专治短回复被前馈盖住。
+func wireUserPromptFirst(m history.Msg) string {
+	prompt := strings.TrimSpace(m.Content)
+	ff := strings.TrimSpace(m.Feedforward)
+	if ff == "" {
+		return history.WireUser(m)
+	}
+	var b strings.Builder
+	if prompt != "" {
+		b.WriteString(prompt)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(history.SnapshotStartMarker)
+	b.WriteByte('\n')
+	b.WriteString(ff)
+	b.WriteByte('\n')
+	b.WriteString(history.SnapshotEndMarker)
+	return b.String()
+}
+
 func historyToSchema(root, system string, bounded []history.Msg, lastUser *history.Msg) []*schema.Message {
 	out := []*schema.Message{schema.SystemMessage(system)}
 	lastSeq := -1
@@ -455,7 +407,8 @@ func historyToSchema(root, system string, bounded []history.Msg, lastUser *histo
 			if lastUser != nil && m.Seq == lastSeq {
 				cp := *lastUser
 				cp.Content = text
-				text = history.WireUser(cp)
+				// 用户原话在前、界面快照在后：避免「工作台现状」淹没短回复，且不暗示「本轮清空历史」
+				text = wireUserPromptFirst(cp)
 			}
 			out = append(out, guest.UserMessage(text, loadUserImages(root, refs)))
 		case "assistant":

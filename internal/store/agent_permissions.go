@@ -26,6 +26,7 @@ const (
 	AgentProviderBailian  = "bailian"
 	AgentProviderDeepSeek = "deepseek"
 	AgentProviderMiniMax  = "minimax"
+	AgentProviderCursor   = "cursor"
 )
 
 // BailianAPIBase 阿里云百炼 OpenAI 兼容地址。
@@ -60,6 +61,26 @@ const MiniMaxAPIBase = "https://api.minimaxi.com/v1"
 // MiniMaxDefaultModel MiniMax 默认模型。
 const MiniMaxDefaultModel = "MiniMax-M2.5"
 
+// CursorAPIBase Cursor SDK Bridge 哨兵地址（真实连接由 Host 拉起 cursor-sdk-bridge）。
+const CursorAPIBase = "cursor-sdk-bridge://local"
+
+// CursorDefaultModel Cursor 默认模型。
+const CursorDefaultModel = "composer-2.5"
+
+// CursorModels Cursor 可选模型。
+var CursorModels = []string{"composer-2.5", "composer-2"}
+
+// NormalizeCursorModel 将 Cursor 模型规范为可选列表中的值。
+func NormalizeCursorModel(model string) string {
+	m := strings.TrimSpace(model)
+	for _, id := range CursorModels {
+		if m == id {
+			return m
+		}
+	}
+	return CursorDefaultModel
+}
+
 // AgentProviderPreset 服务商预设（端点 + 默认模型）。
 type AgentProviderPreset struct {
 	Provider string
@@ -76,6 +97,8 @@ func LookupAgentProviderPreset(provider string) (AgentProviderPreset, bool) {
 		return AgentProviderPreset{Provider: AgentProviderDeepSeek, APIBase: DeepSeekAPIBase, Model: DeepSeekDefaultModel}, true
 	case AgentProviderMiniMax:
 		return AgentProviderPreset{Provider: AgentProviderMiniMax, APIBase: MiniMaxAPIBase, Model: MiniMaxDefaultModel}, true
+	case AgentProviderCursor:
+		return AgentProviderPreset{Provider: AgentProviderCursor, APIBase: CursorAPIBase, Model: CursorDefaultModel}, true
 	default:
 		return AgentProviderPreset{}, false
 	}
@@ -138,16 +161,23 @@ func (s *Store) SaveToolPermissions(m map[string]bool) error {
 
 // BuildAgentCapabilities 合并目录与权限开关。
 func (s *Store) BuildAgentCapabilities() []model.AgentCapabilityDO {
-	perms := s.GetToolPermissions()
+	return s.BuildAgentCapabilitiesWith(s.GetToolPermissions())
+}
+
+// BuildAgentCapabilitiesWith 用给定有效权限合并目录（可含 pack 门控后的结果）。
+func (s *Store) BuildAgentCapabilitiesWith(perms map[string]bool) []model.AgentCapabilityDO {
+	if perms == nil {
+		perms = agentcap.DefaultPermissions()
+	}
 	out := make([]model.AgentCapabilityDO, 0, len(agentcap.Catalog()))
 	for _, c := range agentcap.Catalog() {
 		out = append(out, model.AgentCapabilityDO{
-			Name:         c.Name,
-			Label:        c.Label,
-			Risk:         string(c.Risk),
-			Description:  c.Description,
-			Enabled:      perms[c.Name],
-			NeedsConfirm: c.NeedsConfirm,
+			Name:        c.Name,
+			Label:       c.Label,
+			Risk:        string(c.Risk),
+			Description: c.Description,
+			Enabled:     perms[c.Name],
+			// NeedsConfirm 已废弃：写工具自动执行；风险看 Risk=write
 		})
 	}
 	return out
@@ -166,6 +196,8 @@ func detectProvider(base, saved string) string {
 		return AgentProviderDeepSeek
 	case strings.Contains(b, "minimax"):
 		return AgentProviderMiniMax
+	case strings.HasPrefix(b, "cursor-sdk-bridge://") || strings.Contains(b, "cursor-sdk-bridge"):
+		return AgentProviderCursor
 	default:
 		return AgentProviderOpenAI
 	}

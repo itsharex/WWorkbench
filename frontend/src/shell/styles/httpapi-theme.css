@@ -305,13 +305,15 @@
 .httpapi-tree-api {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-height: 28px;
-  margin: 1px 6px;
-  padding: 4px 8px;
+  gap: var(--list-row-gap, 3px);
+  min-height: var(--list-row-height, 22px);
+  height: var(--list-row-height, 22px);
+  margin: 0 4px;
+  padding: 0 var(--list-row-pad-x, 6px);
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--font-size-ui-sm);
+  line-height: 1.2;
 }
 
 .httpapi-tree-api:hover,
@@ -360,7 +362,7 @@ body.httpapi-tree-dragging * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: var(--list-chevron-size, 16px);
   height: 18px;
   flex-shrink: 0;
   color: var(--color-text-muted);

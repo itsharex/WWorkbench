@@ -17,7 +17,9 @@ const (
 // Gather 组装本轮界面快照（Turn Transport）进 feedforward，与界面一致；细节用工具核实。
 func Gather(ctx model.AgentContextDO, userText string) string {
 	var b strings.Builder
-	b.WriteString("## 工作台现状（Turn Transport · 与界面一致）\n")
+	b.WriteString("## 工作台界面快照（Turn Transport）\n")
+	b.WriteString("- 此块只描述**当前界面**（焦点/绑定/连接），**不是**对话历史，也**不会**清空或取代上文助手消息。\n")
+	b.WriteString("- 用户若只回「1」「2」等数字，必须对照**对话历史里上一轮助手的编号选项**执行；禁止声称「本轮没有选项列表」。\n")
 	if ctx.ActiveProduct != "" {
 		fmt.Fprintf(&b, "- **产品线**：`%s`\n", ctx.ActiveProduct)
 	}
@@ -104,6 +106,26 @@ func Gather(ctx model.AgentContextDO, userText string) string {
 	}
 	if hint := userSSHHint(userText, ctx.Mentions); hint != "" {
 		b.WriteString(hint)
+	}
+	if packID := strings.TrimSpace(ctx.PluginPackID); packID != "" {
+		fmt.Fprintf(&b, "- **插件工作目录** packId=`%s`", packID)
+		if src := strings.TrimSpace(ctx.PluginSourcePath); src != "" {
+			fmt.Fprintf(&b, " source=`%s`", src)
+		}
+		if run := strings.TrimSpace(ctx.PluginRunPath); run != "" {
+			fmt.Fprintf(&b, " run=`%s`", run)
+		}
+		if ctx.PluginUIBuilt {
+			b.WriteString(" uiBuilt=true")
+		} else {
+			b.WriteString(" uiBuilt=false")
+		}
+		b.WriteByte('\n')
+		b.WriteString("- 改该产品 **插件 UI**：只用 plugin_pack_* 工具（工作目录即上面的 source）；禁止 shell 去翻 Host 仓库找 pack 源码。\n")
+		b.WriteString("- **协议 SSOT**：先 `get_plugin_protocol`（~/.wworkbench/plugins/PROTOCOL.md + ww-cap）；各 pack 的 HOST.md 只是补充。看 `get_plugin_pack` 的 capOk/capDetail（提前告知兼容现状）。\n")
+		b.WriteString("- 产品 UI：`src/ui/src/DatabaseWorkbench.tsx`（分段 startLine/maxLines；局部改 edit_plugin_pack_file）。能力从 `@wworkbench/host` 分层（api/i18n/store/nav/workbench/ui/features/util）。\n")
+		b.WriteString("- 版本：构建自动快照；回滚 list_plugin_pack_releases → rollback_plugin_pack。pack 禁用时其 capabilities 对 Agent 不可用。\n")
+		b.WriteString("- 插件 UI 与「连库查表」两层：连库用 list_connections / execute_sql；改界面用 pack 工具。\n")
 	}
 	b.WriteString("- 容器启停/删除用 start_container / stop_container / remove_container（会确认）。shell_run=注入给人看（pip/下载/训练）；shell_probe=无头只读短探针；看可见终端输出用 get_shell_output 按需分页；会话断开用 terminal_reconnect。\n")
 	b.WriteString("- 资产落盘：HTTP→save_http_request+save_http_environment；SSH→save_ssh_host/save_ssh_forward；库→save_connection；日志→save_log_source；Docker→save_docker_context。\n")

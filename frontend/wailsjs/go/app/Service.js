@@ -42,6 +42,10 @@ export function BatchDeleteHTTP(arg1, arg2) {
   return window['go']['app']['Service']['BatchDeleteHTTP'](arg1, arg2);
 }
 
+export function BuildPluginPackUI(arg1) {
+  return window['go']['app']['Service']['BuildPluginPackUI'](arg1);
+}
+
 export function CancelSFTPTask(arg1) {
   return window['go']['app']['Service']['CancelSFTPTask'](arg1);
 }
@@ -164,6 +168,10 @@ export function DeleteSSHHost(arg1) {
 
 export function DownloadSFTPFile(arg1, arg2) {
   return window['go']['app']['Service']['DownloadSFTPFile'](arg1, arg2);
+}
+
+export function DrainAgentWritePending(arg1) {
+  return window['go']['app']['Service']['DrainAgentWritePending'](arg1);
 }
 
 export function DropDatabase(arg1, arg2) {
@@ -300,6 +308,18 @@ export function GetNotebookUI() {
 
 export function GetObjectTree(arg1) {
   return window['go']['app']['Service']['GetObjectTree'](arg1);
+}
+
+export function GetPluginPack(arg1) {
+  return window['go']['app']['Service']['GetPluginPack'](arg1);
+}
+
+export function GetPluginPackSourcePath(arg1) {
+  return window['go']['app']['Service']['GetPluginPackSourcePath'](arg1);
+}
+
+export function GetPluginProtocol() {
+  return window['go']['app']['Service']['GetPluginProtocol']();
 }
 
 export function GetSFTPHome(arg1) {
@@ -450,6 +470,14 @@ export function ListNotes() {
   return window['go']['app']['Service']['ListNotes']();
 }
 
+export function ListPluginPackReleases(arg1) {
+  return window['go']['app']['Service']['ListPluginPackReleases'](arg1);
+}
+
+export function ListPluginPacks() {
+  return window['go']['app']['Service']['ListPluginPacks']();
+}
+
 export function ListQueryHistory(arg1, arg2) {
   return window['go']['app']['Service']['ListQueryHistory'](arg1, arg2);
 }
@@ -546,6 +574,10 @@ export function QuerySQLPage(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['Service']['QuerySQLPage'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ReadPluginPackUIFile(arg1, arg2) {
+  return window['go']['app']['Service']['ReadPluginPackUIFile'](arg1, arg2);
+}
+
 export function ReadSFTPBinary(arg1, arg2) {
   return window['go']['app']['Service']['ReadSFTPBinary'](arg1, arg2);
 }
@@ -580,6 +612,14 @@ export function ResolveContainerDatabaseLink(arg1, arg2) {
 
 export function RestartContainer(arg1, arg2) {
   return window['go']['app']['Service']['RestartContainer'](arg1, arg2);
+}
+
+export function RevealPluginPackPath(arg1) {
+  return window['go']['app']['Service']['RevealPluginPackPath'](arg1);
+}
+
+export function RollbackPluginPack(arg1, arg2) {
+  return window['go']['app']['Service']['RollbackPluginPack'](arg1, arg2);
 }
 
 export function RunContainer(arg1, arg2) {
@@ -682,6 +722,10 @@ export function SetAgentThreadBindings(arg1, arg2) {
   return window['go']['app']['Service']['SetAgentThreadBindings'](arg1, arg2);
 }
 
+export function SetAgentThreadMode(arg1, arg2) {
+  return window['go']['app']['Service']['SetAgentThreadMode'](arg1, arg2);
+}
+
 export function SetAgentThreadSkillIDs(arg1, arg2) {
   return window['go']['app']['Service']['SetAgentThreadSkillIDs'](arg1, arg2);
 }
@@ -692,6 +736,14 @@ export function SetAppSetting(arg1, arg2) {
 
 export function SetDatabase(arg1, arg2) {
   return window['go']['app']['Service']['SetDatabase'](arg1, arg2);
+}
+
+export function SetPluginPackEnabled(arg1, arg2) {
+  return window['go']['app']['Service']['SetPluginPackEnabled'](arg1, arg2);
+}
+
+export function SnapshotPluginPack(arg1) {
+  return window['go']['app']['Service']['SnapshotPluginPack'](arg1);
 }
 
 export function StartContainer(arg1, arg2) {

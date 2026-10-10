@@ -30,6 +30,16 @@ export const Capability = {
   SSHForwardOpen: 'ssh_forward_open',
   PublishAgentSkill: 'publish_agent_skill',
   UpdateAgentSkill: 'update_agent_skill',
+  ListPluginPacks: 'list_plugin_packs',
+  GetPluginPack: 'get_plugin_pack',
+  GetPluginProtocol: 'get_plugin_protocol',
+  ListPluginPackFiles: 'list_plugin_pack_files',
+  ReadPluginPackFile: 'read_plugin_pack_file',
+  EditPluginPackFile: 'edit_plugin_pack_file',
+  WritePluginPackFile: 'write_plugin_pack_file',
+  BuildPluginPackUI: 'build_plugin_pack_ui',
+  ListPluginPackReleases: 'list_plugin_pack_releases',
+  RollbackPluginPack: 'rollback_plugin_pack',
 } as const
 
 export type WorkbenchCapability = (typeof Capability)[keyof typeof Capability]

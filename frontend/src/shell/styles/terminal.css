@@ -5,7 +5,7 @@
 }
 
 .terminal-toolbar {
-  border-bottom: none;
+  border-bottom: 1px solid var(--color-divider);
 }
 
 .terminal-toolbar .product-actions {
@@ -145,7 +145,7 @@
 }
 
 .terminal-sidebar .conn-item {
-  min-height: 36px;
+  min-height: 26px;
 }
 
 .terminal-sidebar .conn-item .mock-icon {

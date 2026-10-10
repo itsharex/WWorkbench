@@ -16,6 +16,7 @@ import (
 	"WWorkbench/internal/environment"
 	"WWorkbench/internal/meta"
 	"WWorkbench/internal/notebook"
+	"WWorkbench/internal/pluginpack"
 	"WWorkbench/internal/portforward"
 	"WWorkbench/internal/query"
 	"WWorkbench/internal/session"
@@ -68,7 +69,12 @@ func main() {
 	envMgr := environment.NewManager(sshHostSvc)
 	notebookSvc := notebook.NewService(st)
 
-	api := app.NewService(AppVersion, st, connSvc, sshHostSvc, termMgr, forwardMgr, sftpMgr, dockerMgr, envMgr, notebookSvc, sessMgr, metaSvc, querySvc, dataSvc)
+	packMgr := pluginpack.NewManager(dataDir)
+	if err := packMgr.EnsureSeeded(); err != nil {
+		log.Fatal(err)
+	}
+
+	api := app.NewService(AppVersion, st, connSvc, sshHostSvc, termMgr, forwardMgr, sftpMgr, dockerMgr, envMgr, notebookSvc, sessMgr, metaSvc, querySvc, dataSvc, packMgr)
 
 	err = wails.Run(&options.App{
 		Title:     "WWorkbench",

@@ -116,6 +116,13 @@
   --control-height-sm: 26px;
   --control-height-chrome: 24px;
 
+  /* 侧栏/对象树列表密度（对齐 Cursor/VS Code explorer ~22px） */
+  --list-row-height: 22px;
+  --list-row-pad-y: 1px;
+  --list-row-pad-x: 6px;
+  --list-row-gap: 3px;
+  --list-chevron-size: 16px;
+
   --motion-fast: 100ms;
   --motion-ui: 140ms;
   --ease-ui: cubic-bezier(0.2, 0, 0, 1);

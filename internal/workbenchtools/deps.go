@@ -8,6 +8,7 @@ import (
 	"WWorkbench/internal/meta"
 	"WWorkbench/internal/model"
 	"WWorkbench/internal/notebook"
+	"WWorkbench/internal/pluginpack"
 	"WWorkbench/internal/query"
 	"WWorkbench/internal/session"
 	"WWorkbench/internal/store"
@@ -35,4 +36,17 @@ type Deps struct {
 	Terminals   *terminal.Manager
 	HarnessRoot func() string
 	Agent       AgentSync
+	PluginPacks *pluginpack.Manager
+}
+
+// EffectivePermissions 用户权限 ∩ pack 启用门控（pack 声明的能力需对应 pack 启用）。
+func (d *Deps) EffectivePermissions() map[string]bool {
+	if d == nil || d.Store == nil {
+		return map[string]bool{}
+	}
+	base := d.Store.GetToolPermissions()
+	if d.PluginPacks == nil {
+		return base
+	}
+	return d.PluginPacks.GatePermissions(base)
 }

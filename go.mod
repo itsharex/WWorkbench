@@ -18,6 +18,7 @@ require (
 	github.com/xuri/excelize/v2 v2.10.1
 	golang.org/x/crypto v0.51.0
 	golang.org/x/sys v0.46.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.54.0
 )
 
@@ -130,7 +131,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	modernc.org/libc v1.74.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

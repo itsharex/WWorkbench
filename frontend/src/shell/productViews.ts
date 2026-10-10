@@ -13,7 +13,7 @@ function lazyNamed<T extends ComponentType>(
 
 /** 产品线工作台按需加载（首包不拉全量 Monaco / xterm / 各产品逻辑）。 */
 export const PRODUCT_VIEWS: Record<ProductId, ComponentType> = {
-  database: lazyNamed(() => import('../products/database/DatabaseWorkbench'), 'DatabaseWorkbench'),
+  database: lazyNamed(() => import('../products/database/DatabaseProductHost'), 'DatabaseProductHost'),
   terminal: lazyNamed(() => import('../products/terminal/TerminalWorkbench'), 'TerminalWorkbench'),
   sftp: lazyNamed(() => import('../products/sftp/SftpWorkbench'), 'SftpWorkbench'),
   docker: lazyNamed(() => import('../products/docker/DockerWorkbench'), 'DockerWorkbench'),
@@ -22,4 +22,5 @@ export const PRODUCT_VIEWS: Record<ProductId, ComponentType> = {
   skills: lazyNamed(() => import('../products/skills/SkillsWorkbench'), 'SkillsWorkbench'),
   httpapi: lazyNamed(() => import('../products/httpapi/HttpApiWorkbench'), 'HttpApiWorkbench'),
   logs: lazyNamed(() => import('../products/logs/LogCenterWorkbench'), 'LogCenterWorkbench'),
+  plugins: lazyNamed(() => import('../products/plugins/PluginsWorkbench'), 'PluginsWorkbench'),
 }

@@ -1,37 +1,78 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api } from '../../api/client'
-import type { Connection, ExecuteResult, IndexMeta, QueryPage, SQLBatchResult, SessionInfo } from '../../api/types'
-import { ConfirmDialog } from '../../components/ConfirmDialog'
-import { ContextMenu } from '../../components/ContextMenu'
-import { EmptyState } from '../../components/EmptyState'
-import { ProductLayout, ResizeHandle, useResizable } from '../../components/layout'
-import { TabContextMenu, openTabContextMenu, type TabContextMenuState } from '../../components/TabContextMenu'
-import { IconDisconnect, IconDownload, IconEdit, IconExplain, IconFolder, IconImportSql, IconNotebook, IconPlay, IconPlus, IconRefresh, IconSql, IconTerminal, IconTrash } from '../../components/Icons'
-import { Select, pressProps, useDismissOverlays } from '../../components/compat'
-import { LoadingPane } from '../../components/LoadingHost'
-import { useLoading, withLoading } from '../../stores/loadingStore'
-import { ConnectionModal } from '../../features/connection/ConnectionModal'
-import { DdlEditor } from '../../features/ddl/DdlEditor'
-import { ObjectTree } from '../../features/explorer/ObjectTree'
-import { CreateDatabaseDialog } from '../../features/database/CreateDatabaseDialog'
-import { ResultPanel } from '../../features/sql-editor/ResultPanel'
-import { SqlEditor, type SqlEditorHandle } from '../../features/sql-editor/SqlEditor'
-import { TableDesignEditor } from '../../features/table-design/TableDesignEditor'
-import { TableDataEditor } from '../../features/table-data/TableDataEditor'
-import { useAppStore } from '../../stores/appStore'
-import { buildDatabaseSurface } from '../../stores/agentSurface'
-import { openTerminal, openSftp, openNotebook, useWorkbenchCommand } from '../../stores/productLink'
-import { Capability } from '../../workbench/capabilities'
-import { payloadBool, payloadStr } from '../../workbench/commandPayload'
-import { subscribeWorkbenchChanged, takePendingWorkbenchChanged, type WorkbenchChangedEvent } from '../../workbench/workbenchRadar'
-import type { ConnectionDraft } from '../../stores/appStore'
-import { APP_SETTING_KEYS, saveAppSetting } from '../../stores/appPreferences'
-import { openAgentDraft, mentionDatabase } from '../../features/agent/openAgentDraft'
-import { useI18n } from '../../i18n'
-import { defaultUntitledSql, localizeWorkTabTitle } from '../../i18n/databaseTabTitle'
-import { queryPageToExport } from '../../utils/queryCsv'
-import { useScrollActiveTabIntoView } from '../../hooks/useScrollActiveTabIntoView'
-import { useSQLExport } from '../../features/export/useSQLExport'
+import { api, i18n, store, nav, workbench, ui, features, util } from '@wworkbench/host'
+import type {
+  Connection,
+  ExecuteResult,
+  IndexMeta,
+  QueryPage,
+  SQLBatchResult,
+  SessionInfo,
+  ConnectionDraft,
+  TabContextMenuState,
+  SqlEditorHandle,
+  WorkbenchChangedEvent,
+} from '@wworkbench/host'
+
+const { useI18n, defaultUntitledSql, localizeWorkTabTitle } = i18n
+const {
+  useAppStore,
+  useLoading,
+  withLoading,
+  APP_SETTING_KEYS,
+  saveAppSetting,
+  buildDatabaseSurface,
+} = store
+const { openTerminal, openSftp, openNotebook, useWorkbenchCommand, openAgentDraft, mentionDatabase } = nav
+const {
+  Capability,
+  payloadBool,
+  payloadStr,
+  subscribeWorkbenchChanged,
+  takePendingWorkbenchChanged,
+} = workbench
+const {
+  Select,
+  ConfirmDialog,
+  ContextMenu,
+  EmptyState,
+  ProductLayout,
+  ResizeHandle,
+  TabContextMenu,
+  openTabContextMenu,
+  LoadingPane,
+  pressProps,
+  useDismissOverlays,
+  useResizable,
+  useScrollActiveTabIntoView,
+  icons,
+} = ui
+const {
+  IconDisconnect,
+  IconDownload,
+  IconEdit,
+  IconExplain,
+  IconFolder,
+  IconImportSql,
+  IconNotebook,
+  IconPlay,
+  IconPlus,
+  IconRefresh,
+  IconSql,
+  IconTerminal,
+  IconTrash,
+} = icons
+const {
+  ConnectionModal,
+  DdlEditor,
+  ObjectTree,
+  CreateDatabaseDialog,
+  ResultPanel,
+  SqlEditor,
+  TableDesignEditor,
+  TableDataEditor,
+  useSQLExport,
+} = features
+const { queryPageToExport } = util
 
 const treeLoadingKey = (sessionId: string) => `database.tree.${sessionId}`
 const resultLoadingKey = (sessionId: string) => `database.result.${sessionId}`

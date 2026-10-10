@@ -33,7 +33,7 @@ import { AgentModeMenu, AgentModelMenu } from './AgentComposerMenus'
 import type { AgentChatMode } from './agentChatMode'
 
 interface Props {
-  busy: boolean
+  active: boolean
   threadId: string
   autoMentions: AgentMention[]
   threadMentions: AgentMention[]
@@ -51,7 +51,7 @@ interface Props {
 
 /** AgentInputBar 对话输入区（@ 提及 SSH / 数据库 / Docker）。 */
 export function AgentInputBar({
-  busy,
+  active,
   threadId,
   autoMentions,
   threadMentions,
@@ -337,7 +337,7 @@ export function AgentInputBar({
   }
 
   const send = () => {
-    if (busy) return
+    if (active) return
     const parsed = parseLeadingSkillCommand(input, skills)
     const fromPending = pendingSkills.map((s) => s.id)
     const fromThread = threadSkillIds
@@ -535,16 +535,16 @@ export function AgentInputBar({
       </div>
       <div className="agent-composer-toolbar">
         <div className="agent-composer-toolbar-start">
-          <AgentModeMenu mode={mode} disabled={busy} onChange={onModeChange} />
+          <AgentModeMenu mode={mode} disabled={active} onChange={onModeChange} />
           <AgentModelMenu
             modelName={modelName}
             provider={provider}
-            disabled={busy}
+            disabled={active}
             onChange={onModelChange}
           />
         </div>
         <div className="agent-composer-toolbar-end">
-          {busy && threadId && (
+          {active && threadId && (
             <button type="button" className="wn-btn wn-btn-sm wn-btn-ghost" onClick={onStop}>
               {t('agent.stop')}
             </button>
@@ -552,7 +552,7 @@ export function AgentInputBar({
           <button
             type="button"
             className="wn-btn wn-btn-sm wn-btn-primary agent-composer-send"
-            disabled={busy || (!input.trim() && images.length === 0 && pendingSkills.length === 0)}
+            disabled={active || (!input.trim() && images.length === 0 && pendingSkills.length === 0)}
             onClick={send}
           >
             {t('agent.send')}

@@ -1,8 +1,8 @@
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { useAppStore } from '../stores/appStore'
 import { bootstrapAppState } from '../stores/bootstrapApp'
-import { PRODUCT_VIEWS } from './productViews'
+import { listRegisteredProductIds, resolveProductViews } from '../plugin/registry'
 import { useMountedProductViews } from './useMountedProductViews'
 import { ProductRail } from './ProductRail'
 import { ShellChrome } from './ShellChrome'
@@ -14,9 +14,8 @@ import { useAgentStore } from '../stores/agentStore'
 import { ConfirmHost } from '../components/ConfirmHost'
 import { installFocusGate } from '../components/compat'
 import { useI18n } from '../i18n'
+import type { ProductId } from './products'
 import './shell.css'
-
-type ProductKey = keyof typeof PRODUCT_VIEWS
 
 /** 多产品线工作台壳 */
 export function AppShell() {
@@ -26,6 +25,8 @@ export function AppShell() {
   const agentOpen = useAgentStore((s) => s.panelOpen)
   const toggleAgent = useAgentStore((s) => s.togglePanel)
   const { mountedProducts } = useMountedProductViews(activeProduct)
+  const productViews = useMemo(() => resolveProductViews(), [])
+  const productKeys = useMemo(() => listRegisteredProductIds(), [])
 
   useEffect(() => {
     if (preferencesReady) {
@@ -66,9 +67,9 @@ export function AppShell() {
       <div className={`workbench-body${agentOpen ? ' agent-open' : ''}`}>
         <ProductRail />
         <div className="workbench-content">
-          {(Object.keys(PRODUCT_VIEWS) as ProductKey[]).map((key) => {
+          {productKeys.map((key: ProductId) => {
             if (!mountedProducts.has(key)) return null
-            const View = PRODUCT_VIEWS[key]
+            const View = productViews[key]
             const visible = activeProduct === key
             return (
               <div

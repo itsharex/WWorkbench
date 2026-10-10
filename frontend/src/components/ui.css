@@ -1387,10 +1387,11 @@ button.wn-select-trigger {
 .conn-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  margin: 1px 8px;
-  padding: 5px 10px;
+  gap: 6px;
+  min-height: 26px;
+  height: auto;
+  margin: 0 4px;
+  padding: 3px 8px;
   cursor: pointer;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
@@ -1519,13 +1520,16 @@ button.wn-select-trigger {
 .wn-tree-item {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 6px;
-  font-size: 11px;
+  gap: var(--list-row-gap, 3px);
+  min-height: var(--list-row-height, 22px);
+  height: var(--list-row-height, 22px);
+  padding: var(--list-row-pad-y, 1px) var(--list-row-pad-x, 6px);
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.2;
   cursor: pointer;
   user-select: none;
   border-radius: var(--radius-sm);
-  margin: 1px 0;
   color: var(--color-text-secondary);
   transition: background 0.12s, color 0.12s;
 }
@@ -1573,12 +1577,12 @@ button.wn-select-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin: 0 -2px 0 0;
+  width: var(--list-chevron-size, 16px);
+  height: var(--list-chevron-size, 16px);
+  margin: 0;
   padding: 0;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs, 4px);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -1594,8 +1598,8 @@ button.wn-select-trigger {
 .tree-chevron {
   display: block;
   box-sizing: border-box;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   flex-shrink: 0;
   opacity: 0.7;
   pointer-events: none;
@@ -1633,8 +1637,8 @@ button.wn-select-trigger {
 
 .tree-expand-placeholder {
   display: inline-flex;
-  width: 22px;
-  height: 22px;
+  width: var(--list-chevron-size, 16px);
+  height: var(--list-chevron-size, 16px);
   flex-shrink: 0;
   cursor: default;
 }

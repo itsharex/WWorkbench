@@ -64,7 +64,7 @@ func toolGetNote(_ context.Context, d *Deps, raw json.RawMessage) ToolResult {
 	}
 	id := strings.TrimSpace(in.NoteID)
 	if id == "" {
-		return Fail("请填写 noteId。当前打开的笔记在本轮工作台现状里；也可 search_notes / list_notes 查找。笔记在工作台库内，不要 cat 文件，也不要用 recall_resource。")
+		return Fail("请填写 noteId。当前打开的笔记在界面快照里；也可 search_notes / list_notes 查找。笔记在工作台库内，不要 cat 文件，也不要用 recall_resource。")
 	}
 	n, err := d.Notebook.GetNote(id)
 	if err != nil {

@@ -16,6 +16,7 @@ import (
 	"WWorkbench/internal/meta"
 	"WWorkbench/internal/model"
 	"WWorkbench/internal/notebook"
+	"WWorkbench/internal/pluginpack"
 	"WWorkbench/internal/portforward"
 	"WWorkbench/internal/query"
 	"WWorkbench/internal/session"
@@ -55,6 +56,7 @@ type Service struct {
 	mcpLastErr    string
 	sqlExportMu   sync.Mutex
 	sqlExportCancels map[string]context.CancelFunc
+	pluginPacks   *pluginpack.Manager
 }
 
 // NewService 创建应用服务。
@@ -73,6 +75,7 @@ func NewService(
 	meta *meta.Service,
 	queries *query.Service,
 	table *data.Service,
+	pluginPacks *pluginpack.Manager,
 ) *Service {
 	svc := &Service{
 		version:          version,
@@ -90,6 +93,7 @@ func NewService(
 		queries:          queries,
 		table:            table,
 		sqlExportCancels: make(map[string]context.CancelFunc),
+		pluginPacks:      pluginPacks,
 	}
 	svc.logFollow = newLogFollowManager(svc)
 	return svc
@@ -115,6 +119,9 @@ func (s *Service) Shutdown(ctx context.Context) {
 	s.mcpMu.Lock()
 	_ = s.stopMCPLocked()
 	s.mcpMu.Unlock()
+	if s.agentRunner != nil {
+		s.agentRunner.Close()
+	}
 	if s.harnessHost != nil {
 		_ = s.harnessHost.Close()
 		s.harnessHost = nil
